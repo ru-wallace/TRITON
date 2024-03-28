@@ -1,0 +1,12 @@
+TRITON/*
+
+__pycache__/*
+*.png
+*.json
+*.txt
+*.csv
+
+*/.env
+.env
+
+*/test/*
