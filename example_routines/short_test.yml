@@ -1,0 +1,29 @@
+name: short_test
+number_limit: 10
+
+number_limit: 30
+
+default_time_unit: seconds
+time_limit_unit: m
+time_limit: 30
+
+initial_delay_time_unit: s
+initial_delay_time: 0
+
+repeat: 4
+interval_mode: capture_end
+
+interval_time_unit: secs
+interval_time: 0
+
+integration_time_unit: seconds
+integration_time: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1]
+loop_integration_time: FALSE
+
+gain: 1
+loop_gain: FALSE
+
+all_combinations: FALSE
+
+min_tick_length_unit: s
+min_tick_length: 0.01

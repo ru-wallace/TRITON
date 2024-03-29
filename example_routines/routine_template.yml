@@ -1,0 +1,207 @@
+# Template file for building a Routine to capture images
+
+# Routine files follow the YAML format specification (https://yaml.org/)
+# See https://en.wikipedia.org/wiki/YAML for details.
+# File extension can be .txt, .yaml, or .yml
+# Parameters should be set in the following format:
+
+parameter_name: value
+
+
+# Spaces are allowed before and after the colon
+# Lines beginning with a "#" are comments and will be ignored, 
+# as will blank lines and lines that the program cannot parse.
+# "#" comments can also be used in line with parameter settings,
+# though must be at the end of the line and separated by a space.
+# The format is entirely case insensitive (Except the routine_name,
+# which keeps the case you set).
+# If a parameter is not present in the file, or is not a valid
+# value, the default value will be used.
+# Invalid values should be notified when the file is imported.
+# If a parameter is set twice in the file, the second value will
+# be used. The user should be notified when the file is imported.
+
+# Possible Parameters:
+
+# routine_name: The name of the routine - optional. If not set, the file name will be used
+
+name: example_routine_1
+
+# number_limit: Integer number of images to capture. (Default: 500) Max: 5000
+#     This is a hard limit so the routine will finish after this 
+#     even if there are still unused integration_times or gain values,
+#     or the time limit has not been reached.
+
+number_limit: 30
+
+# default_time_unit: unit to be used as default to set routine times (Default: seconds)
+#     All time values can have their own unit set in: 
+#                                                       - time_limit_unit
+#                                                       - initial_delay_unit
+#                                                       - interval_unit
+#                                                       - integration_time_unit
+#                                                       - min_tick_length_unit
+#
+#     If any of those are not set, they will default to this value 
+# 
+#     Allowed values:   hours,   hrs,  h
+#                       minutes, mins, m
+#                       seconds, secs, s
+#                       milliseconds, ms
+#                       microseconds, us
+
+default_time_unit: seconds
+
+# time_limit_unit: unit of time to be used in setting the time limit 
+#     (Default: value of default_time_unit or seconds if not set)
+#     Allowed values:   hours,   hrs,  h
+#                       minutes, mins, m
+#                       seconds, secs, s
+#                       milliseconds, ms
+#                       microseconds, us
+
+
+# time_limit: Time limit for capturing images. (Default: 2 hours) Max: 24hrs
+#     Uses time unit set in time_limit_unit or default_time_unit if that is
+#     not set (default unit is seconds).
+#     This is a hard limit, the same as number_limit. If both time_limit and number_limit
+#     are set, the routine will stop at whichever limit is reached first.
+#     If an initial delay is set (see below), the time limit will measure from 
+#     the start of the first capture, once the initial delay is complete.
+
+time_limit: 600
+
+# initial_delay_time_unit: unit of time to be used in setting the time limit 
+#     (Default: value of default_time_unit or seconds if not set)
+#     Allowed values:   hours,   hrs,  h
+#                       minutes, mins, m
+#                       seconds, secs, s
+#                       milliseconds, ms
+#                       microseconds, us
+
+# initial_delay_time: Delay from Launching the routine to first capture. (Default: 0) 
+#     Uses time unit set above in default_time_unit (default is seconds).
+#     
+
+initial_delay_time: 5
+
+# repeat: Number of times to repeat the routine (Default: 1)
+#       If there are a range of integration times and/or gain values specified,
+#       the routine will repeat these this number of times.
+#       Repeats are not exempt from the time_limit and number limit - once those
+#       are reached, the routine will finish even if there are more repeats
+#       remaining, or if in the middle of a repeat. 
+
+repeat: 1
+
+# interval_mode: Sets how the interval between captures will be timed (Default: capture_start (0))
+#     Allowed values:   capture_start, 0 : interval is calculated from the start 
+#                                          of a capture to the start of the next
+#
+#                       capture_end,   1 : interval is calculated from the end 
+#                                          of a capture to the start of the next
+
+interval_mode: capture_start
+
+# interval_time_unit: (Default: uses default_time_unit value): Time unit to use for interval_time.
+#     If not set, uses the value provided in time_unit, or seconds if that is not set
+#
+#     Allowed values:   hours,   hrs,  h
+#                       minutes, mins, s
+#                       seconds, secs, s
+#                       milliseconds, ms
+#                       microseconds, us
+
+interval_time_unit: secs
+
+# interval_time: length of interval between captures (Default:0)
+#     Uses the unit of time set in interval_unit or if that is not set, 
+#     time_unit (Default seconds).
+#     If in capture_start mode, if the interval is shorter than the integration time,
+#     or the capture takes longer than the interval to auto-adjust integration time,
+#     the capture will take place as soon as the device is ready to start a new capture.
+
+interval_time: 0
+
+# integration_time_unit: Time unit to use for integration_time. (Default: value of default_time_unit)
+#     Allowed values:   hours,   hrs,  h
+#                       minutes, mins, s
+#                       seconds, secs, s
+#                       milliseconds, ms
+#                       microseconds, us
+
+integration_time_unit: seconds
+
+# integration_time: Integration time/times. min/max is device specific
+#     Uses unit in integration_time_unit if set, otherwise the default unit
+#     of time.
+#     If multiple values are wanted, enclose in square brackets "[]" and
+#     separate them with a comma and a space.
+#     A value of 0 will auto adjust exposure time for that capture.
+#     If there are multiple values, the routine will stop running 
+#     once an image has been captured at each integration time. (Unless 
+#     integration_time_loop is set to TRUE).
+#     If left blank, or at 0, or not included, the program will default to 
+#     auto-adjusting the integration time for each image.
+
+
+integration_time: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5, 10, 20]
+
+# loop_integration_time: TRUE or FALSE (Default FALSE) 
+#     If TRUE, the routine will keep looping through the list of exposure times 
+#     until it reaches the number limit or the time limit, or any other
+#     stop condition. 
+#     If TRUE and more gain values are set than integration times, the 
+#     routine will run until it has completed going through the gain values.
+#     If both integration_time_loop and gain_loop are true, the routine will
+#     keep cycling through both until another stop condition is met.
+
+loop_integration_time: FALSE
+
+# gain: gain in dB (default: 1) min: 1, max:16
+#     If multiple values are used for this and integration time, they must 
+#     have the same number of values.
+#     If multiple values are set, the routine will stop after all the values
+#     have been used (unless gain_loop is TRUE)
+#     If set to 0 or an invalid number, will go to default 
+
+gain: 1
+
+# loop_gain: (default: FALSE)
+#      Same idea as integration_time_loop but for gain.
+
+loop_gain: FALSE
+
+# all_combinations: (default: FALSE) If true, the routine will capture
+#     an image with every combination of integration time and gain settings.
+
+all_combinations: FALSE
+
+#########################################################################
+################# The settings below this are for technical #############
+################# fiddling and should not be changed unless #############
+################# you know what you are doing.              #############
+#########################################################################
+
+# min_tick_length_unit: unit of time to be used in setting the minimum tick length 
+#     (Default: value of default_time_unit or seconds if not set)
+#     Allowed values:   hours,   hrs,  h
+#                       minutes, mins, m
+#                       seconds, secs, s
+#                       milliseconds, ms
+#                       microseconds, us
+
+min_tick_length_unit: s
+
+# min_tick_length: minimum time each "tick" will take. (Default: 0.01)
+#      This is just a technical parameter that should mostly be left
+#      as default. 
+#      Uses the unit in min_tick_length_unit if set, otherwise
+#      the default unit of time.
+#      Longer tick times will use less computing power but interval times
+#      and time limits will be less accurate. Integration times
+#      are controlled in the device so they will be unaffected.
+#      A tick may take longer than this value, i.e for integration times,
+#      or if saving an images takes longer.
+
+min_tick_length: 0.01
