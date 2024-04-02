@@ -393,7 +393,7 @@ class Connection:
             
             self.node("AcquisitionStop").Execute()
             self.node("AcquisitionStop").WaitUntilDone()
-
+            #TODO: Check Buffer Stream Mode: https://www.1stvision.com/cameras/IDS/IDS-manuals/en/stream-buffer-handling-mode.html
             # Stop and flush datastream
             self.datastream.StopAcquisition(ids_peak.AcquisitionStopMode_Default)
             self.datastream.Flush(ids_peak.DataStreamFlushMode_DiscardAll)
