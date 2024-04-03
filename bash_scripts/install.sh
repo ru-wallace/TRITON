@@ -1,7 +1,5 @@
 #!/bin/bash
 
-
-echo 'new size' > /sys/module/usbcore/parameters/usbfs_memory_mb
 echo 1000 > /sys/module/usbcore/parameters/usbfs_memory_mb
 
 #Get file path of the script
