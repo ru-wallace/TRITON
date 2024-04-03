@@ -1,6 +1,9 @@
 TRITON/*
 
 __pycache__/*
+*/__pycache__/*
+
+*/saveset.py
 *.png
 *.json
 *.txt
@@ -10,3 +13,4 @@ __pycache__/*
 .env
 
 */test/*
+
