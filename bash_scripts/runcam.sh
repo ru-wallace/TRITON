@@ -1,22 +1,22 @@
 #!/bin/bash
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-BASE_DIR="$SCRIPT_DIR/.."
+BASE_DIR="$(dirname "$SCRIPT_DIR")"
 
-if [ ! -f "$BASE_DIR/python_scripts/.env" ]
-then # load environment variables from .env file
-  export $(grep -v '^#' "$BASE_DIR/python_scripts/.env" | xargs)
-else
-  echo "Error: .env file not found"
-  exit 1
+echo "BASE_DIR: $BASE_DIR"
+
+if [ -f "$BASE_DIR/python_scripts/.env" ]
+    then # load environment variables from .env file
+    export $(grep -v '^#' "$BASE_DIR/python_scripts/.env" | xargs)
+    else
+    echo "Error: .env file not found"
+    exit 1
 fi
-
 
 
 ROUTINE_FILE=""
 SESSION_NAME=""
 
-LOG_FILE="$BASE_DIR/misc/run_log.txt"
 
 
 
@@ -95,20 +95,18 @@ fi
 cd "$SCRIPT_DIR/.."  &> /dev/null
 
 
-echo "#######################################" >> $LOG_FILE
-
-dt=$(date '+%Y-%m-%d %H:%M:%S');
-
-
-echo "$dt" >> $LOG_FILE
 
 
 # Launch Python script with named arguments
-conda run -n ids_device "$BASE_DIR/python_scripts/auto_capture.py" --routine "$ROUTINE_FILE" --session "$SESSION_NAME"  >> $LOG_FILE &
+
+echo "CONDA_DIRECTORY: $CONDA_DIRECTORY"
+source "$CONDA_DIRECTORY/etc/profile.d/conda.sh"
+conda activate ids_device
+python "$BASE_DIR/python_scripts/auto_capture.py" --routine "$ROUTINE_FILE" --session "$SESSION_NAME" &
 
 disown -h $!
 
 
-echo "Capture started. Execution log in $BASE_DIR/misc/run_log.txt"
+echo "Capture started."
 
 cd -
