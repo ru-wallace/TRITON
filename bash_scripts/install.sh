@@ -21,4 +21,6 @@ if [ ! -f $BASE_DIR/python_scripts/.env ]; then
     echo 'LD_LIBRARY_PATH="/opt/ids-peak-with-ueyetl_2.7.1.0-16417_arm64/lib:$LD_LIBRARY_PATH"' >> "$SCRIPT_DIR/../python_scripts/.env"
     echo 'GENICAM_GENTL64_PATH="/opt/ids-peak-with-ueyetl_2.7.1.0-16417_arm64/lib/ids/cti" ' >> "$SCRIPT_DIR/../python_scripts/.env"
     echo 'GENICAM_GENTL32_PATH="/opt/ids-peak-with-ueyetl_2.7.1.0-16417_arm64/lib/ids/cti"' >> "$SCRIPT_DIR/../python_scripts/.env"
+
+    chmod 6666 "$BASE_DIR/python_scripts/.env"
 fi
