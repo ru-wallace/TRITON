@@ -18,7 +18,10 @@ class Camera:
         h.update()
         self.device = h.create()
         self.nodemap = self.device.remote_device.node_map
-        
+        self.data_stream = self.device.data_streams[0]
+        print("Datastream:")
+        print(self._query_node_list("Buffer", nodemap=self.data_stream.node_map))
+        self.data_stream.node_map.StreamBufferHandlingMode.set_value("NewestOnly")
         #Reset device timestamp to zero
         self.nodemap.TimestampReset.execute()
         self.start_time = datetime.now()
@@ -34,9 +37,9 @@ class Camera:
         
         # Activate chunk mode and enable pixelformat and exposure time chunks so the device passes this data along with the image
         self.nodemap.ChunkModeActive.set_value("True")
-        
         for entry in self.nodemap.ChunkSelector._get_symbolics():
             if entry in ["ExposureTime", "PixelFormat"]:
+                print(f"Setting {entry} to True")
                 self.nodemap.ChunkSelector.set_value(entry)
                 self.nodemap.ChunkEnable.set_value("True")
                 
@@ -44,7 +47,8 @@ class Camera:
               
     def capture_image(self, auto=False):
         try:
-            self.auto_exposure(auto)
+            #print("Min Buffers: ", self.data_stream.NumBuffersAnnouncedMinRequired())
+            self.auto_exposure_device(auto)
                 
             self.device.start()
             image_array = None
@@ -67,6 +71,7 @@ class Camera:
                 
                 exposure_time = self.nodemap.ChunkExposureTime.value
                 print("Exposure time: ", exposure_time)
+                #print("Brightness Auto Status: ", self.nodemap.BrightnessAutoStatus.value)
                 
                 
             self.device.stop()  
@@ -76,12 +81,12 @@ class Camera:
             return None    
     
     
-    def auto_exposure(self, on=True):
+    def auto_exposure_device(self, on=True):
         if not on:
             self.nodemap.GainAuto.set_value("Off")
             self.nodemap.ExposureAuto.set_value("Off")
             return self.nodemap.ExposureAuto.value == "Off"
-        
+        self.nodemap.BrightnessAutoFramerateLimitMode.set_value("Off")
         self.set_exposure_time(seconds=0.001)
         
 
@@ -100,7 +105,7 @@ class Camera:
         old_mode = self.nodemap.SensorOperationMode.value
         mode = ""
         time = None
-        self.capture_empty_image(5)
+        self.capture_empty_until_stable()
         print("--")
 
         print("Device Exposure Time: ", self.nodemap.ExposureTime.value)
@@ -111,9 +116,13 @@ class Camera:
             mode = "Default"
     
         if mode != "":
+            
             self.load_set(mode)
+            self.nodemap.BrightnessAutoFramerateLimitMode.set_value("Off")
+            
+            
         
-        self.capture_empty_image(5)
+        self.capture_empty_until_stable()
         print("Device Exposure Time: ", self.nodemap.ExposureTime.value)
             
         self.nodemap.ExposureAuto.set_value("Continuous")
@@ -143,13 +152,36 @@ class Camera:
             return False
 
     def capture_empty_image(self, number=1):
+        print(f"Capturing {number} empty images")
+        
         for i in range(number):
             self.device.start()
             with self.device.fetch() as buffer:
                 buffer.update_chunk_data()
                 time = self.nodemap.ChunkExposureTime.value
-                print("Chunk Exposure Time: ", time/10**6, "S")
+                print("Empty image - Exposure Time: ", time/10**6, "S")
             self.device.stop()
+        
+    def capture_empty_until_stable(self):
+        print("Capturing empty images until stable")
+        stable = False
+        last_exposure_time = 0
+        iterations = 0
+        while not stable:
+            #self.capture_empty_image(3)
+            self.device.start()
+            with self.device.fetch() as buffer:
+                buffer.update_chunk_data()
+                time = self.nodemap.ChunkExposureTime.value
+                print("Empty Image - Exposure Time: ", time/10**6, "S")
+                if time == last_exposure_time:
+                    stable = True
+                last_exposure_time = time
+            self.device.stop()
+            self.data_stream.flush()
+            iterations += 1
+        print("Final Exposure Time: ", last_exposure_time/10**6, "S")
+        print("Iterations: ", iterations)
         
     def print_settings(self):
         print("User Set: ", self.nodemap.UserSetSelector.value)
@@ -172,6 +204,7 @@ class Camera:
 
     def load_set(self, set:int|str):
         try:
+            pixel_format = self.nodemap.PixelFormat.value
             set = int(set)
             if set in [0,1]:
                 self.nodemap.UserSetSelector.set_value(f"UserSet{set}")
@@ -191,15 +224,19 @@ class Camera:
             traceback.print_exc(e)
         
         finally:
+            self.set_pixel_format(pixel_format)
             print(f"Invalid User Set '{set}'")
             
     def _valid_pixel_formats(self):
         return self.nodemap.PixelFormat._get_symbolics()
         
-    def _node_list(self):
+    def _node_list(self, nodemap=None):
 
+        if nodemap is None:
+            nodemap = self.nodemap
+            
         node_list = []
-        for item in self.nodemap._get_nodes():
+        for item in nodemap._get_nodes():
             try:
                 node = item._get_node()
                 node_tuple = (node._get_display_name(), item.to_string())
@@ -210,16 +247,20 @@ class Camera:
         
         return node_list
     
-
+    def _query_node_list(self, name, nodemap=None):
+        for node, value in self._node_list(nodemap=nodemap):
+            if name in node:
+                try:
+                    print(f"{node}: {value}")
+                    pass
+                except:
+                    print(f"{node}: {value}")
+                    pass
+                
+        
 if __name__ == "__main__":
     c = Camera()
-    for node, value in c._node_list():
-        try:
-            #print(f"{node}: {value}")
-            pass
-        except:
-            #print(f"{node}: {value}")
-            pass
-            
+    c._query_node_list("Flush")
     image = c.capture_image(auto=True)
-    image.save("/home/ru-admin/control/TRITON/test_image.png")
+    #c._query_node_list("AutoExposure")
+    
