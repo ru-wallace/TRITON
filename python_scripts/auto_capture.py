@@ -83,9 +83,11 @@ def main():
         print_and_log("Could not connect to Device")
         print_and_log(*traceback.format_exception(e))
         sys.exit(1)
-        
+    
+    
       
     def capture_image(integration_time_secs:float=None, gain:float=None, auto:bool=False):
+        
         
         nonlocal current_session
         nonlocal current_routine
@@ -93,6 +95,8 @@ def main():
         
         if gain is not None:
             device.gain(gain) #Change device gain if it is passed 
+        
+        device.node("AcquisitionMode").SetCurrentEntry("SingleFrame")
             
         #Switch to auto-adjust integration time mode if integration time is 0 or None
         #Otherwise, set the integration time to the passed value.
@@ -205,6 +209,8 @@ def main():
                                         }
                                     })
             json.dump(session_dict, session_list, indent=4)
+        
+        print_and_log(f"New Session Created in {current_session.directory_path}")
     
 
     Path("./image_data").mkdir(parents=True, exist_ok=True)
@@ -253,10 +259,14 @@ def main():
     #               - an "image" property which is None unless an image was captured with that tick, in which case it is a Cam_Image object
     #               - an "Image count" property which has the number of images captured so far in this run of the routine.
     
+    
+    device.node("ExposureAuto").SetCurrentEntry("Off")
+    
     complete = False
 
     check_time = time()
     
+    consecutive_error_count = 0
     while not complete:
         try:
             if time() - check_time > 5:
@@ -274,10 +284,17 @@ def main():
                 current_session.add_image(img)
                 save_image_data(img)
                 
+            consecutive_error_count = 0
+            
         except Exception as e:
             print_and_log("Tick Error")
             print_and_log(*traceback.format_exception(e))
 
+            consecutive_error_count += 1
+            if consecutive_error_count > 5:
+                print_and_log("Too many consecutive tick errors. Exiting")
+                sys.exit("Too many consecutive tick errors.")
+                break
     
     print_and_log(f"Complete at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
 
