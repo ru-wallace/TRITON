@@ -18,7 +18,7 @@ with suppress_stdout():
     from ids_peak import ids_peak
     from ids_peak_ipl import ids_peak_ipl
     from ids_peak import ids_peak_ipl_extension
-
+    #from ids_peak_afl import ids_peak_afl_extension
     import traceback #Module for finding Exception causes more easily
     from datetime import datetime
     import numpy as np
@@ -103,7 +103,10 @@ class Connection:
                 self.device = None
                 return False
             
-            self.datastream = self.datastreams[0].OpenDataStream()
+            self.datastream: ids_peak.DataStream = self.datastreams[0].OpenDataStream()
+            self.datastream_nodemap :ids_peak.NodeMap = self.datastream.NodeMaps()[0]
+            self.datastream_nodemap.FindNode("StreamBufferHandlingMode").SetCurrentEntry("OldestFirst")
+            
             self.printq("Opened datastream")
             
             # Get nodemap of the remote device for all accesses to the genicam nodemap tree
