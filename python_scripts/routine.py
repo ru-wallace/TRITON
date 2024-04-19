@@ -28,8 +28,8 @@ class Routine:
 
     def __init__(self, name,
                  initial_delay_time_secs:float=0, 
-                 number_limit:int|float=500,
-                 time_limit_secs:float=7200,
+                 number_limit:int|float=5000,
+                 time_limit_secs:float=345600,
                  repeat:int|float = 1,
                  interval_mode:str=CAPTURE_END, 
                  interval_time_secs:float=0,
@@ -48,7 +48,7 @@ class Routine:
         self.initial_delay=initial_delay_time_secs
         self.number_limit = min(int(number_limit), 5000) #max images is 5000
         
-        self.time_limit_secs = min(time_limit_secs, 86400) #maximum time is 24 hours 
+        self.time_limit_secs = min(time_limit_secs, 345600) #maximum time is 96 hours 
         self.repeat = int(repeat)
         
         settings = Routine._create_settings_matrix(integration_times=integration_time_secs,
@@ -57,7 +57,11 @@ class Routine:
                                                        number_limit=self.number_limit,
                                                        loop_gain=loop_gain,
                                                        loop_integration_time=loop_integration_time)
+        
+        if self.repeat == 0:
+            self.repeat = int(self.number_limit // np.size(settings[0,:]))
 
+        
         settings = np.tile(settings, self.repeat)
 
         
