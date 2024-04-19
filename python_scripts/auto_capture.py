@@ -9,6 +9,7 @@ from datetime import datetime
 from time import time
 from contextlib import contextmanager
 
+import ms5837
 
 import routine
 import session
@@ -84,8 +85,36 @@ def main():
         print_and_log(*traceback.format_exception(e))
         sys.exit(1)
     
+    try:
+        sensor = ms5837.MS5837_30BA()
+        if not sensor.init():
+            print_and_log("Could not connect to Pressure Sensor")
+            sys.exit("Could not connect to Pressure Sensor")
+        
+        sensor.setFluidDensity(ms5837.DENSITY_SALTWATER)
+    except Exception as e:
+        print_and_log("Could not connect to Pressure Sensor")
+        print_and_log(*traceback.format_exception(e))
+        sys.exit("Could not connect to Pressure Sensor")
     
+    def get_depth() -> float:
+        try:
+            sensor.read()
+            depth : float = sensor.depth()
+        except:
+            print_and_log("Pressure Sensor Not Responding - setting depth to 0.0")
+            depth : float = 0.0
+        return depth
       
+    def get_temp() -> float:
+        try:
+            sensor.read()
+            temp : float = sensor.temperature()
+        except:
+            print_and_log("Pressure Sensor Not Responding - setting temp to 0.0")
+            temp : float = 0.0
+        return temp
+
     def capture_image(integration_time_secs:float=None, gain:float=None, auto:bool=False):
         
         
@@ -227,7 +256,7 @@ def main():
     def save_image_data(image:Cam_Image):
         nonlocal filename
         
-        image_data = [image.integration_time/1000000, image.temp, image.inner_fraction_white, image.outer_fraction_white, image.corner_fraction_white,
+        image_data = [image.integration_time/1000000, image.temp, get_temp(), image.depth, image.inner_fraction_white, image.outer_fraction_white, image.corner_fraction_white,
                            *image.inner_avgs, *image.outer_avgs, *image.corner_avgs]
         
         new_file = False
@@ -237,7 +266,7 @@ def main():
         
         with open(filename, "a") as file:
             if new_file:
-                file.write(f"int_time_s temp_C inner_wf outer_wf corner_wf {' '.join([f'inner_avg_{index}' for index, _ in enumerate(image.inner_avgs)])} {' '.join([f'outer_avg_{index}' for index, _ in enumerate(image.outer_avgs)])} {' '.join([f'corner_avg_{index}' for index, _ in enumerate(image.corner_avgs)])}\n")
+                file.write(f"int_time_s temp_C env_temp_C depth_M inner_wf outer_wf corner_wf {' '.join([f'inner_avg_{index}' for index, _ in enumerate(image.inner_avgs)])} {' '.join([f'outer_avg_{index}' for index, _ in enumerate(image.outer_avgs)])} {' '.join([f'corner_avg_{index}' for index, _ in enumerate(image.corner_avgs)])}\n")
                 
             
             file.write(' '.join(str(item) for item in image_data))
@@ -269,8 +298,8 @@ def main():
     consecutive_error_count = 0
     while not complete:
         try:
-            if time() - check_time > 5:
-                print_and_log(f"Device Temp: {device.get_temperature()}°C")
+            if time() - check_time > 900:
+                print_and_log(f"Device Temp: {device.get_temperature()}°C  Depth: {get_depth():.2f}m Pressure Sensor Temp: {get_temp():.2f}°C")
                 check_time = time()
             tick_result = current_routine.tick()
             complete = tick_result["complete"]
@@ -281,6 +310,7 @@ def main():
             #If the tick returns with a Cam_Image object, add it to the session (Which will save it 
             # to the session directory and add its info to the session log).
             if img is not None:
+                img.set_depth(get_depth())
                 current_session.add_image(img)
                 save_image_data(img)
                 
@@ -294,7 +324,7 @@ def main():
             if consecutive_error_count > 5:
                 print_and_log("Too many consecutive tick errors. Exiting")
                 sys.exit("Too many consecutive tick errors.")
-                break
+                
     
     print_and_log(f"Complete at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
 

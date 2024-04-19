@@ -184,7 +184,8 @@ class Cam_Image:
         return self._corner_fraction_white
 
 
-
+    def set_depth(self, depth_m: float)->None:
+        self._depth = depth_m
 
     def time_string(self, format:str="%Y_%m_%d__%H_%M_%S") -> str:
         """Generate string of the timestamp. Uses a default format unelss specified
