@@ -17,24 +17,25 @@ fi
 ROUTINE_FILE=""
 SESSION_NAME=""
 
-
+source "$CONDA_DIRECTORY/etc/profile.d/conda.sh"
+conda activate ids_device
 
 
 # Parse options
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -c|--console)
-            conda run -n ids_device "$BASE_DIR/python_scripts/console_interface.py"
+        -c|--console|-i|--interactive)
+            python "$BASE_DIR/python_scripts/console_interface.py"
             exit 0
             ;;
 
         -h|--help)
             echo "Usage: $0 [OPTIONS]"
             echo "Options:"
-            echo "  -h, --help              Show this help message"
-            echo "  -r, --routine FILE      Specify a routine file. The ./routines directory in IDS directory will be looked at if full path not specified"
-            echo "  -s, --session           Specify session name"
-            echo "  -c, --console           Open Console Interface for Camera"
+            echo "  -h, --help                          Show this help message"
+            echo "  -r, --routine FILE                  Specify a routine file. The ./routines directory in IDS directory will be looked at if full path not specified"
+            echo "  -s, --session                       Specify session name"
+            echo "  -c, --console , -i, --interactive   Open Console Interface for Camera"
             exit 0
             ;;
         -r|--routine)
@@ -99,10 +100,8 @@ cd "$SCRIPT_DIR/.."  &> /dev/null
 
 # Launch Python script with named arguments
 
-echo "CONDA_DIRECTORY: $CONDA_DIRECTORY"
-source "$CONDA_DIRECTORY/etc/profile.d/conda.sh"
-conda activate ids_device
-python "$BASE_DIR/python_scripts/auto_capture.py" --routine "$ROUTINE_FILE" --session "$SESSION_NAME" &
+
+python "$BASE_DIR/python_scripts/auto_capture.py" --routine "$ROUTINE_FILE" --session "$SESSION_NAME"  >/dev/null &
 
 disown -h $!
 
