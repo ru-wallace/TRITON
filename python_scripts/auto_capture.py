@@ -37,13 +37,13 @@ def main():
     
     current_session: session.Session = None
     current_routine: routine.Routine = None
-    
     def print_and_log(*args, **kwargs):
         """Function for logging output of this script. If this is run from a systemd service the output should go to the RPi logs 
         to be read with journalctl, but this also writes to a file in the session which is loaded. If there is no session loaded 
         it saves the output until one is opened and then writes it.
         """
         try:
+                
             str_args = ""
             for arg in args:
                 str_args+=str(arg)
@@ -59,9 +59,12 @@ def main():
                 
             else:
                 stored_strings += string + "\n"
+            
         except Exception as e: 
             traceback.print_exc(e)
-
+    def log_error():
+        with open("error_log.log", "a") as err_file:
+            err_file.write(stored_strings)
     run_number = 0
     
     print_and_log("Running run_process.py")
@@ -187,11 +190,15 @@ def main():
                         current_routine = this_routine
                         break
                 except Exception as e:
-                        continue
+                    print_and_log(f"Routine file: {routine_dir}/{filename}")
+                    print_and_log(traceback.format_exc(e))
+                    print_and_log("###############")
+                    continue
 
     #If no matching routine can be found, log an error and exit
     if current_routine is None:
         print_and_log(f"Routine {routine_name} does not exist.\nMake sure routine name has no spaces\n Exiting.")
+        log_error()
         sys.exit(1)
     
 
@@ -256,8 +263,8 @@ def main():
     def save_image_data(image:Cam_Image):
         nonlocal filename
         
-        image_data = [image.integration_time/1000000, image.temp, get_temp(), image.depth, image.inner_fraction_white, image.outer_fraction_white, image.corner_fraction_white,
-                           *image.inner_avgs, *image.outer_avgs, *image.corner_avgs]
+        image_data = [image.time_string(format="%Y-%m-%d %H:%M:%S"), image.integration_time/1000000, image.cam_temp, get_temp(), image.depth, image.inner_fraction_white, image.outer_fraction_white, image.corner_fraction_white,
+                           *image.inner_avgs, *image.outer_avgs, *image.corner_avgs, image.relative_luminance, image.unscaled_absolute_luminance]
         
         new_file = False
         
@@ -266,10 +273,10 @@ def main():
         
         with open(filename, "a") as file:
             if new_file:
-                file.write(f"int_time_s temp_C env_temp_C depth_M inner_wf outer_wf corner_wf {' '.join([f'inner_avg_{index}' for index, _ in enumerate(image.inner_avgs)])} {' '.join([f'outer_avg_{index}' for index, _ in enumerate(image.outer_avgs)])} {' '.join([f'corner_avg_{index}' for index, _ in enumerate(image.corner_avgs)])}\n")
+                file.write(f"timestamp, int_time_s, auto temp_C, env_temp_C, depth_M, inner_wf, outer_wf, corner_wf, {','.join([f'inner_avg_{index}' for index, _ in enumerate(image.inner_avgs)])}, {','.join([f'outer_avg_{index}' for index, _ in enumerate(image.outer_avgs)])}, {','.join([f'corner_avg_{index}' for index, _ in enumerate(image.corner_avgs)])}, relative_lum, absolute_lum\n")
                 
             
-            file.write(' '.join(str(item) for item in image_data))
+            file.write(','.join(str(item) for item in image_data))
             file.write('\n')
             
             
