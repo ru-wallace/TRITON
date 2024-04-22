@@ -8,7 +8,7 @@ import json
 CAPTURE_START = "capture_start"
 CAPTURE_END="capture_end"
 ACCEPTED_PARAMS={"name":str, "initial_delay_time_secs":(float,int), "number_limit":(float,int),
-                 "time_limit_secs":(float,int), "repeat":(float, int), "interval_mode":str,
+                 "time_limit_secs":(float,int), "repeat":(float, int), "repeat_interval_time_secs":(float,int), "interval_mode":str,
                  "interval_secs":(float,int), "integration_time_secs":(float,int),
                  "loop_integration_time":bool, "gain":(float,int), "loop_gain":bool,
                  "min_tick_length_secs":(float,int), "all_combinations":bool}
@@ -31,6 +31,7 @@ class Routine:
                  number_limit:int|float=5000,
                  time_limit_secs:float=345600,
                  repeat:int|float = 1,
+                 repeat_interval_time_secs:float=0,
                  interval_mode:str=CAPTURE_END, 
                  interval_time_secs:float=0,
                  integration_time_secs:float|list=0, 
@@ -50,6 +51,7 @@ class Routine:
         
         self.time_limit_secs = min(time_limit_secs, 345600) #maximum time is 96 hours 
         self.repeat = int(repeat)
+        self.repeat_interval_time_secs = repeat_interval_time_secs
         
         settings = Routine._create_settings_matrix(integration_times=integration_time_secs,
                                                        gains=gain,
@@ -58,8 +60,12 @@ class Routine:
                                                        loop_gain=loop_gain,
                                                        loop_integration_time=loop_integration_time)
         
+        self.iteration_length = np.size(settings[0,:])
+        
         if self.repeat == 0:
-            self.repeat = int(self.number_limit // np.size(settings[0,:]))
+            self.repeat = int(self.number_limit / self.iteration_length)
+        
+        
 
         
         settings = np.tile(settings, self.repeat)
@@ -95,7 +101,9 @@ class Routine:
         string += f"\nTime Limit: {self.time_limit_secs}s"
         string += f"\nInterval: {self.interval_secs}s"
         string += f"\nInterval Mode: {self.interval_mode}"
+        string += f"\nIteration Length: {self.iteration_length}"
         string += f"\nRepeat: {self.repeat}"
+        string += f"\nRepeat Interval: {self.repeat_interval_time_secs}s"
         string += f"\nIntegration_times (s): { (str(self.int_times[:7]).strip(']') + '...]') if len(str(self.int_times)) > 10 else str(self.int_times)}"
         string += f"\nGain settings: { (str(self.gains[:7]).strip(']') + '...]') if len(str(self.gains)) > 10 else str(self.gains)}"
         if self.tick_length != 0.01:
@@ -124,6 +132,8 @@ class Routine:
             self.next_capture = time.time()+self.interval_secs
         else:
             self.next_capture = self.next_capture + self.interval_secs
+        if self.image_count % self.iteration_length == 0:
+            self.next_capture = self.next_capture + self.repeat_interval_time_secs
         
     def tick(self):
         captured_image = None
@@ -286,7 +296,9 @@ def parse_line(line:str) -> dict:
             value = parse_value(value)
             return (parameter, value)
         except Exception as e:
+            print(f"Error processing Line: {line}")
             traceback.print_exc(e)
+
             return None
         
 def convert_to_seconds(value:int|float, unit:str)->float:
@@ -320,11 +332,13 @@ def from_dict(params:dict, capture_function:callable=Routine.placeholder_capture
              "time_limit_unit":None, 
              "initial_delay_time_unit":None,
              "interval_time_unit":None,
+             "repeat_interval_time_unit":None,
              "integration_time_unit":None,
              "min_tick_length_unit":None}
     
     times = {"time_limit":None,
              "initial_delay_time":None,
+             "repeat_interval_time":None,
              "interval_time":None,
              "integration_time":None,
              "min_tick_length":None}

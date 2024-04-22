@@ -94,6 +94,26 @@ initial_delay_time: 5
 
 repeat: 1
 
+# repeat_interval_time_unit: (Default: uses default_time_unit value): Time unit to use for repeat_interval_time.
+#     If not set, uses the value provided in time_unit, or seconds if that is not set
+#
+#     Allowed values:   hours,   hrs,  h
+#                       minutes, mins, s
+#                       seconds, secs, s
+#                       milliseconds, ms
+#                       microseconds, us
+
+repeat_interval_time_unit: s
+
+# repeat_interval_time: length of interval between routine repeats (Default:0)
+#     Uses the unit of time set in repeat_interval_unit or if that is not set, 
+#     time_unit (Default seconds).
+#     If in capture_start mode, if the interval is shorter than the integration time,
+#     or the capture takes longer than the interval to auto-adjust integration time,
+#     the next capture will take place as soon as the device is ready to start a new capture.
+
+repeat_interval_time: 0
+
 # interval_mode: Sets how the interval between captures will be timed (Default: capture_start (0))
 #     Allowed values:   capture_start, 0 : interval is calculated from the start 
 #                                          of a capture to the start of the next
