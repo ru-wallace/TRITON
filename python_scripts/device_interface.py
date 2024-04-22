@@ -75,7 +75,7 @@ class Camera:
                 
                 
             self.device.stop()  
-            return Cam_Image(image_array,  format=format, timestamp = timestamp, integration_time = exposure_time, gain = 1, temp = 0, depth = 0 )
+            return Cam_Image(image_array,  format=format, timestamp = timestamp, integration_time = exposure_time, gain = 1, cam_temp = 0, depth = 0 )
         except Exception as e:
             traceback.print_exc(e)
             return None    
