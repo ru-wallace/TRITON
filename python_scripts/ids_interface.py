@@ -273,7 +273,7 @@ class Connection:
                 return image
                     
     
-    def create_cam_image(self, image:np.ndarray)-> cam_image.Cam_Image:
+    def create_cam_image(self, image:np.ndarray, auto:bool=False)-> cam_image.Cam_Image:
         
         image_depth = get_depth()
 
@@ -289,12 +289,14 @@ class Connection:
         format=self.node("PixelFormat").CurrentEntry().SymbolicValue()
     
         image = cam_image.Cam_Image(image=image,
-                                format=format,
                                 timestamp = image_timestamp,
                                 integration_time=image_exposure,
+                                auto=auto,
                                 gain=image_gain,
                                 depth=image_depth,
-                                temp = image_temp)
+                                cam_temp = image_temp,
+                                sensor_temp=0,
+                                format=format)
     
         return image
     
@@ -446,8 +448,18 @@ class Connection:
                         self.datastream.QueueBuffer(buffer)
 
             
-            
-            buffer = self.datastream.WaitForFinishedBuffer(buff_time) 
+            buffer = None
+            attempts = 0
+            while buffer is None:
+                try:
+
+                    buffer = self.datastream.WaitForFinishedBuffer(buff_time)
+                except Exception as e:
+                    buff_time += 100
+                    attempts +=1
+                    if attempts > 10:
+                        traceback.print_exc(e)
+                        break
             
             # Create IDS peak IPL image and convert it to RGBa8 format
             ipl_image = ids_peak_ipl_extension.BufferToImage(buffer)
