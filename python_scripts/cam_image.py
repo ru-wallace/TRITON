@@ -15,7 +15,7 @@ import luminance
 
 class Cam_Image:
     
-    def __init__(self, image:np.ndarray, timestamp:datetime, integration_time:int, gain:float, depth:float, temp:float, format:str) -> None:
+    def __init__(self, image:np.ndarray, timestamp:datetime, integration_time:int, auto:bool, gain:float, depth:float, cam_temp:float, sensor_temp:float, format:str) -> None:
         """Create Cam_Image object which contains an Image and a combination of pre-set and calculated metadata.
 
         Args:
@@ -50,11 +50,15 @@ class Cam_Image:
 
             self._integration_time : int = integration_time
             
+            self._auto : bool = auto
+            
             self._gain : float = gain
             
             self._depth : float = depth
             
-            self._temp :float = temp
+            self._cam_temp :float = cam_temp
+            
+            self._sensor_temp : float = sensor_temp
             
 
             
@@ -139,6 +143,9 @@ class Cam_Image:
         return self._integration_time
     
     @property
+    def auto(self) -> bool:
+        return self._auto
+    @property
     def gain(self) -> float:
         return self._gain
     
@@ -147,8 +154,12 @@ class Cam_Image:
         return self._depth
     
     @property
-    def temp(self) -> float:
-        return self._temp
+    def cam_temp(self) -> float:
+        return self._cam_temp
+    
+    @property
+    def sensor_temp(self) -> float:
+        return self._sensor_temp
 
     
     @property
@@ -322,7 +333,7 @@ def create_metadata(image:Cam_Image) ->PngInfo:
         metadata.add_text("integration", str(image.integration_time))
         metadata.add_text("gain", str(image.gain))
         metadata.add_text("depth", str(image.depth))
-        metadata.add_text("temp", str(image.temp))
+        metadata.add_text("temp", str(image.cam_temp))
         metadata.add_text("relative_lum", str(image.relative_luminance))
         metadata.add_text("unscaled_abs_lum", str(image.unscaled_absolute_luminance))
         metadata.add_text("pixel_avgs_inner", str(image.inner_avgs))
