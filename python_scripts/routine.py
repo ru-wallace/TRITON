@@ -1,9 +1,10 @@
 
 import time
+from datetime import datetime, timedelta
 import traceback
 from pathlib import Path
 import numpy as np
-import json
+import threading
 
 CAPTURE_START = "capture_start"
 CAPTURE_END="capture_end"
@@ -84,6 +85,12 @@ class Routine:
         
         self.interval_secs = interval_time_secs
         
+        capture_start = self.interval_mode == CAPTURE_START
+        capture_end = self.interval_mode == CAPTURE_END
+        self.expected_time = self.int_times.size +sum(self.int_times) + self.repeat*self.repeat_interval_time_secs + capture_start*self.interval_secs*self.int_times[self.int_times > self.interval_secs -1].size + capture_end*self.interval_secs*self.int_times.size
+        self.expected_time = int(min(self.time_limit_secs, self.expected_time))
+        
+        
         self.tick_length = min(min_tick_length_secs, 0.001)
         #Variables for running
         self.capture_function = capture_function
@@ -92,13 +99,17 @@ class Routine:
         self.image_count = 0
         self.complete = False
         self.last_time_printed=0
+        self.capturing_image=False
+        
+
+        
         
     def to_string(self, print_string:bool=False):
         string = ""
         string += f"Routine: {self.name}"
         string += f"\nInitial delay: {self.initial_delay}s"
         string += f"\nNumber Limit: {self.number_limit}"
-        string += f"\nTime Limit: {self.time_limit_secs}s"
+        string += f"\nTime Limit: {str(timedelta(seconds=self.time_limit_secs))}"
         string += f"\nInterval: {self.interval_secs}s"
         string += f"\nInterval Mode: {self.interval_mode}"
         string += f"\nIteration Length: {self.iteration_length}"
@@ -106,15 +117,30 @@ class Routine:
         string += f"\nRepeat Interval: {self.repeat_interval_time_secs}s"
         string += f"\nIntegration_times (s): { (str(self.int_times[:7]).strip(']') + '...]') if len(str(self.int_times)) > 10 else str(self.int_times)}"
         string += f"\nGain settings: { (str(self.gains[:7]).strip(']') + '...]') if len(str(self.gains)) > 10 else str(self.gains)}"
+        string += f"\nPlanned Image total: {self.int_times.size}"
+        string += f"\nTime Estimate: {datetime.fromtimestamp(time.time() + self.expected_time).strftime('%Y-%m-%d %H:%M:%S')} ({str(timedelta(seconds=self.expected_time))})"
         if self.tick_length != 0.01:
             string += f"\nTick length: {self.tick_length}"
         string+="\n"
         if print_string:
             print(string)
         return string
+    
+    def start_capture_thread(self, integration_time, gain):
         
-    def capture_image(self, integration_time, gain):
+        capture_thread = threading.Thread(target=self.capture_image, args=(integration_time, gain))
+        if self.interval_mode == CAPTURE_START:
+            self.set_next_capture_time()
+        
+        capture_thread.start()
 
+    def capture_image(self, integration_time, gain):
+        attempt_start = time.time()
+        while self.capturing_image == True:
+            time.sleep(self.tick_length)
+            if time.time() - attempt_start > 20:
+                return
+        self.capturing_image = True
         auto = False
         int_string = str(integration_time)+'s'
         if integration_time == 0:
@@ -122,9 +148,18 @@ class Routine:
             int_string = "Auto"
         
         print(f"{round(time.time()-self.start_time, 2)}s ==> Capturing Img #{self.image_count+1} ~ I:{int_string} | G: {gain}dB")
-        image = self.capture_function(integration_time, gain, auto)
-        self.image_count += 1
-        return image
+        try:
+                    
+            capture = self.capture_function(integration_time, gain, auto)
+            if capture:
+                self.image_count += 1
+        except Exception as e:
+            traceback.print_exc(e)
+        finally:
+            if self.interval_mode == CAPTURE_END: 
+                self.set_next_capture_time()
+            self.capturing_image = False
+        
     
     def set_next_capture_time(self):
 
@@ -139,11 +174,8 @@ class Routine:
         captured_image = None
         string = ""
         
-        def tick_outcome(value:bool=True, return_string:str=""):
-            return({"complete": value,
-                    "image": captured_image ,
-                    "image_count": self.image_count,
-                    "string": return_string})
+        def tick_outcome(value:bool=True):
+            return({"complete": value})
         
         if self.start_time is None:
             self.start_time = time.time()
@@ -151,19 +183,19 @@ class Routine:
             self.next_capture =  self.start_time + self.initial_delay
             
         now = time.time()
-        run_time = now-self.start_time
+        self.run_time = now-self.start_time
         
 
         if self.number_limit is not None:
-            self.complete = self.image_count >= self.number_limit
+            self.complete = self.image_count >= self.number_limit and not self.capturing_image
         
          
         if self.time_limit_secs is not None:
             if not self.complete:
-                self.complete = run_time >= self.time_limit_secs
+                self.complete = self.run_time >= self.time_limit_secs and not self.capturing_image
             
         if not self.complete:
-            self.complete = self.image_count >= len(self.int_times)
+            self.complete = self.image_count >= len(self.int_times) and not self.capturing_image
               
         if self.complete:
             print("Routine Complete")
@@ -172,9 +204,9 @@ class Routine:
         
           
             
-        if now > self.next_capture:
-            captured_image = self.capture_image(self.int_times[self.image_count], self.gains[self.image_count])
-            self.set_next_capture_time()
+        if now > self.next_capture and not self.capturing_image:
+            captured_image = self.start_capture_thread(self.int_times[self.image_count], self.gains[self.image_count])
+            
         
         tick_remaining = self.tick_length-(time.time()-now)
         if tick_remaining > 0:

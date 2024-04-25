@@ -5,8 +5,8 @@ import os
 from dotenv import load_dotenv
 import traceback
 import sys
-from datetime import datetime
-from time import time
+from datetime import datetime, timedelta
+from time import time, sleep
 from contextlib import contextmanager
 
 import ms5837
@@ -19,6 +19,8 @@ from cam_image import Cam_Image
 load_dotenv()
 
 DATA_DIR = Path(os.environ.get("DATA_DIRECTORY"))
+PIPE_IN_FILE = Path(os.environ.get("PIPE_IN_FILE"))
+PIPE_OUT_FILE = Path(os.environ.get("PIPE_OUT_FILE"))
 
 def main():
     
@@ -108,6 +110,16 @@ def main():
             print_and_log("Pressure Sensor Not Responding - setting depth to 0.0")
             depth : float = 0.0
         return depth
+    
+    def get_pressure() -> float:
+        try:
+            sensor.read()
+            pressure : float = sensor.pressure()
+        except:
+            print_and_log("Pressure Sensor Not Responding - setting depth to 0.0")
+            pressure : float = 0.0
+        return pressure
+      
       
     def get_temp() -> float:
         try:
@@ -117,14 +129,39 @@ def main():
             print_and_log("Pressure Sensor Not Responding - setting temp to 0.0")
             temp : float = 0.0
         return temp
+    
+    def save_image_data(image:Cam_Image, filename):
+
+        group = str(image.integration_time)
+        if image.auto:
+            group = "auto"
+            
+        image_data = [group, image.time_string(format="%Y-%m-%d %H:%M:%S"), image.integration_time, image.integration_time/1000000, image.cam_temp, get_temp(), get_pressure(), image.depth, image.inner_fraction_white, image.outer_fraction_white, image.corner_fraction_white,
+                           *image.inner_avgs, *image.outer_avgs, *image.corner_avgs, image.relative_luminance, image.unscaled_absolute_luminance]
+        
+        new_file = False
+        
+        with open(filename, "r") as file:
+            new_file = len(file.read()) == 0
+        
+        with open(filename, "a") as file:
+            if new_file:
+                file.write(f"group, timestamp, integration_time, integration_time_secs, camera_temperature_C, sensor_temp_C, pressure_mbar, depth_M, inner_saturated_pixels, outer_saturated_pixels, corner_saturated_pixels, {','.join([f'inner_pixel_average_{index}' for index, _ in enumerate(image.inner_avgs)])}, {','.join([f'outer_pixel_average_{index}' for index, _ in enumerate(image.outer_avgs)])}, {','.join([f'corner_pixel_average_{index}' for index, _ in enumerate(image.corner_avgs)])}, relative_luminance, absolute_luminance\n")
+                
+            
+            file.write(','.join(str(item) for item in image_data))
+            file.write('\n')
 
     def capture_image(integration_time_secs:float=None, gain:float=None, auto:bool=False):
         
-        
         nonlocal current_session
         nonlocal current_routine
+        nonlocal csv_filepath
         
         
+        print_and_log(f"Capturing Image #{current_routine.image_count} - Integration Time : {integration_time_secs}s")
+        
+
         if gain is not None:
             device.gain(gain) #Change device gain if it is passed 
         
@@ -137,16 +174,18 @@ def main():
         else:
             device.exposure_time(seconds=integration_time_secs)
             
+        try:    
+            image: Cam_Image = current_session.run_and_log(lambda: device.capture_image(auto=auto))
             
-        image: Cam_Image = current_session.run_and_log(lambda: device.capture_image(auto=auto))
+            image.set_depth(get_depth())
+            current_session.add_image(image)
+            save_image_data(image, csv_filepath)
+            
+            print_and_log(f"Captured Image #{current_routine.image_count}")
+        except Exception as e:
+            print_and_log("Error Capturing Image")
+            print_and_log(traceback.format_exc(e))
         
-        
-        print_and_log(f"Captured Image #{current_routine.image_count}")
-        
-        
-                    
-        
-        return image
    
     
 
@@ -213,29 +252,34 @@ def main():
     new_session = False
     session_dict:dict = None
     
-
-    with open( session_list_file, mode="r") as session_list:
-        #Open the session list and parse the json data into a dict object 
-        session_dict = json.load(session_list)
+    try:
+        with open(session_list_file, mode="r") as session_list:
+            #Open the session list and parse the json data into a dict object 
+            session_dict = json.load(session_list)
+            
+            #Check if a session of the specified name is in the session list
+            if session_name in session_dict:
+                #If it is get the session directory path and load the session from the file.
+                session_path = Path(session_dict[session_name]['directory_path']) / session_name.replace(" ", "_")
+                if session_path is not None and session_path.exists():
+                    print_and_log("Session Exists")
+                    current_session = session.from_file(session_path)
+                    current_session.print_info()
+            else:
+                #If the session is not in the list, make a new session with that name. Session info such as coordinates/location
+                # will have to be added later in the console interface
+                print_and_log(f"Session {session_name} not found")
+                print_and_log("Creating new session...")
+                new_session = True
+                
+    except:
+        print_and_log("Could not open Session List")
+        new_session = True
+        session_dict = {}
         
-        #Check if a session of the specified name is in the session list
-        if session_name in session_dict:
-            #If it is get the session directory path and load the session from the file.
-            session_path = Path(session_dict[session_name]['directory_path']) / session_name.replace(" ", "_")
-            if session_path is not None and session_path.exists():
-                print_and_log("Session Exists")
-                current_session = session.from_file(session_path)
-                current_session.print_info()
-        else:
-            #If the session is not in the list, make a new session with that name. Session info such as coordinates/location
-            # will have to be added later in the console interface
-            print_and_log(f"Session {session_name} not found")
-            print_and_log("Creating new session...")
-            new_session = True
-            current_session = session.Session(name=session_name, directory=DATA_DIR / "sessions")
-    
     #If a new session was created, add it to the session list file.
     if new_session:
+        current_session = session.Session(name=session_name, directory=DATA_DIR / "sessions")
         with open(session_list_file, mode="w") as session_list:
             session_dict.update({current_session.name: 
                                     {"start_time":current_session.time_string(),
@@ -255,31 +299,11 @@ def main():
     while os.path.exists(DATA_DIR /"sessions" / f"{current_session.name}" / f"run_{run_number}.csv"):
         run_number += 1
     
-    filename = DATA_DIR / "sessions" / f"{current_session.name}" / f"run_{run_number}.csv"
+    csv_filepath = DATA_DIR / "sessions" / f"{current_session.name}" / f"run_{run_number}.csv"
     
-    open(filename, "w").close()
+    open(csv_filepath, "w").close()
     
-        
-    def save_image_data(image:Cam_Image):
-        nonlocal filename
-        
-        image_data = [image.time_string(format="%Y-%m-%d %H:%M:%S"), image.integration_time/1000000, image.cam_temp, get_temp(), image.depth, image.inner_fraction_white, image.outer_fraction_white, image.corner_fraction_white,
-                           *image.inner_avgs, *image.outer_avgs, *image.corner_avgs, image.relative_luminance, image.unscaled_absolute_luminance]
-        
-        new_file = False
-        
-        with open(filename, "r") as file:
-            new_file = len(file.read()) == 0
-        
-        with open(filename, "a") as file:
-            if new_file:
-                file.write(f"timestamp, int_time_s, auto temp_C, env_temp_C, depth_M, inner_wf, outer_wf, corner_wf, {','.join([f'inner_avg_{index}' for index, _ in enumerate(image.inner_avgs)])}, {','.join([f'outer_avg_{index}' for index, _ in enumerate(image.outer_avgs)])}, {','.join([f'corner_avg_{index}' for index, _ in enumerate(image.corner_avgs)])}, relative_lum, absolute_lum\n")
-                
-            
-            file.write(','.join(str(item) for item in image_data))
-            file.write('\n')
-            
-            
+  
             
     print_and_log(f"Running routine {current_routine.name}...")
     print_and_log(current_routine.to_string())
@@ -296,45 +320,87 @@ def main():
     #               - an "Image count" property which has the number of images captured so far in this run of the routine.
     
     
+
+    if not os.path.exists(PIPE_IN_FILE):
+        os.mkfifo(PIPE_IN_FILE)
+        
+    if not os.path.exists(PIPE_OUT_FILE):
+        os.mkfifo(PIPE_OUT_FILE)
+    
+
+    
     device.node("ExposureAuto").SetCurrentEntry("Off")
     
     complete = False
 
-    check_time = time()
+    check_time_long = time()
+    check_time_short = time()
     
     consecutive_error_count = 0
-    while not complete:
+    in_pipe_fd = os.open(PIPE_IN_FILE, os.O_RDONLY | os.O_NONBLOCK)
+    
+    def write_to_pipe(message:str):
         try:
-            if time() - check_time > 900:
-                print_and_log(f"Device Temp: {device.get_temperature()}°C  Depth: {get_depth():.2f}m Pressure Sensor Temp: {get_temp():.2f}°C")
-                check_time = time()
-            tick_result = current_routine.tick()
-            complete = tick_result["complete"]
-            img:Cam_Image = tick_result["image"]
             
-            
-            
-            #If the tick returns with a Cam_Image object, add it to the session (Which will save it 
-            # to the session directory and add its info to the session log).
-            if img is not None:
-                img.set_depth(get_depth())
-                current_session.add_image(img)
-                save_image_data(img)
-                
-            consecutive_error_count = 0
-            
+            if time() - check_time_short > 1:
+                check_time_short = time()
+                out_pipe_fd = os.open(PIPE_OUT_FILE, os.O_WRONLY | os.O_NONBLOCK)
+                with os.fdopen(out_pipe_fd, "w") as out_pipe:
+                    out_pipe.write(message)
+                os.close(out_pipe_fd)  
+                print_and_log("Successfully passed message")
+        except OSError:
+            pass
         except Exception as e:
-            print_and_log("Tick Error")
-            print_and_log(*traceback.format_exception(e))
+            print_and_log("Error passing message to named pipe")
+            print_and_log(traceback.format_exc(e))
+        
+    
+    
+    with os.fdopen(in_pipe_fd) as in_pipe:
+        while not complete:
+            try:
 
-            consecutive_error_count += 1
-            if consecutive_error_count > 5:
-                print_and_log("Too many consecutive tick errors. Exiting")
-                sys.exit("Too many consecutive tick errors.")
+                # Check for stop message
+                message = in_pipe.read()
+                if message:
+                    if message == "STOP":
+                        print_and_log(f"Received STOP Message - Exiting")
+                        sleep(0.2)
+                        write_to_pipe("STOPPING")
+                        break
                 
+                
+                
+                        
+                
+                if time() - check_time_long > 120:
+                    print_and_log(f"Device Temp: {device.get_temperature()}°C  Depth: {get_depth():.2f}m Pressure Sensor Temp: {get_temp():.2f}°C")
+                    check_time_long = time()
+                tick_result = current_routine.tick()
+                complete = current_routine.complete
+
+                write_to_pipe(f"Routine: {current_routine.name}\nSession: {current_session.name}\nRuntime: {str(timedelta(seconds=int(current_routine.run_time)))}\n")
+
+                
+                consecutive_error_count = 0
+                
+                
+                
+            except Exception as e:
+                print_and_log("Tick Error")
+                print_and_log(*traceback.format_exception(e))
+
+                consecutive_error_count += 1
+                
+                print_and_log("Error count: ", consecutive_error_count)
+                if consecutive_error_count > 5:
+                    print_and_log("Too many consecutive tick errors. Exiting")
+                    sys.exit("Too many consecutive tick errors.")
+                    
     
     print_and_log(f"Complete at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-
+    
 #Wrapper code for running this script.
 #Exits with exit code 0 if completed successfully, or 1 if there is an unhandled exception.
 if __name__ == '__main__':
