@@ -296,10 +296,12 @@ def main():
     Path("./image_data").mkdir(parents=True, exist_ok=True)
     
     run_number = 0
-    while os.path.exists(DATA_DIR /"sessions" / f"{current_session.name}" / f"run_{run_number}.csv"):
+    
+    
+    while os.path.exists(current_session.session_directory() / f"run_{run_number}.csv"):
         run_number += 1
     
-    csv_filepath = DATA_DIR / "sessions" / f"{current_session.name}" / f"run_{run_number}.csv"
+    csv_filepath = current_session.session_directory() / f"run_{run_number}.csv"
     
     open(csv_filepath, "w").close()
     
@@ -342,13 +344,11 @@ def main():
     def write_to_pipe(message:str):
         try:
             
-            if time() - check_time_short > 1:
-                check_time_short = time()
-                out_pipe_fd = os.open(PIPE_OUT_FILE, os.O_WRONLY | os.O_NONBLOCK)
-                with os.fdopen(out_pipe_fd, "w") as out_pipe:
-                    out_pipe.write(message)
-                os.close(out_pipe_fd)  
-                print_and_log("Successfully passed message")
+            out_pipe_fd = os.open(PIPE_OUT_FILE, os.O_WRONLY | os.O_NONBLOCK)
+            with os.fdopen(out_pipe_fd, "w") as out_pipe:
+                out_pipe.write(message)
+            os.close(out_pipe_fd)  
+            print_and_log("Successfully passed message " + message)
         except OSError:
             pass
         except Exception as e:
@@ -364,32 +364,45 @@ def main():
                 # Check for stop message
                 message = in_pipe.read()
                 if message:
+                    
                     if message == "STOP":
-                        print_and_log(f"Received STOP Message - Exiting")
-                        sleep(0.2)
-                        write_to_pipe("STOPPING")
-                        break
-                
-                
-                
+                        current_routine.stop_signal = True
+                        print_and_log("Received STOP Message")
+                        if current_routine.capturing_image:
+                            print_and_log("Waiting for image capture to finish...")
+                        else: 
+                            print_and_log("Stopping")
+                        for i in range(10):
+                            write_to_pipe("STOPPING")
+                            sleep(0.2)
+                    else:
+                        print_and_log("Received Message: ", message)
                         
+                        
+
                 
-                if time() - check_time_long > 120:
-                    print_and_log(f"Device Temp: {device.get_temperature()}°C  Depth: {get_depth():.2f}m Pressure Sensor Temp: {get_temp():.2f}°C")
-                    check_time_long = time()
+                if not current_routine.stop_signal:   
+                    if time() - check_time_long > 120:
+                        print_and_log(f"Device Temp: {device.get_temperature()}°C  Depth: {get_depth():.2f}m Pressure Sensor Temp: {get_temp():.2f}°C")
+                        check_time_long = time()
+                        
+    
+                if time() - check_time_short > 1:
+                    check_time_short = time()
+                    message = f"Routine: {current_routine.name}\nSession: {current_session.name}\nRuntime: {str(timedelta(seconds=int(current_routine.run_time)))}\nImages Captured: {current_routine.image_count}"
+                    if current_routine.stop_signal:
+                        message  += "STOPPING\n"
+                    write_to_pipe()
+
                 tick_result = current_routine.tick()
                 complete = current_routine.complete
-
-                write_to_pipe(f"Routine: {current_routine.name}\nSession: {current_session.name}\nRuntime: {str(timedelta(seconds=int(current_routine.run_time)))}\n")
-
-                
                 consecutive_error_count = 0
                 
                 
                 
             except Exception as e:
                 print_and_log("Tick Error")
-                print_and_log(*traceback.format_exception(e))
+                print_and_log(traceback.format_exception(e))
 
                 consecutive_error_count += 1
                 
