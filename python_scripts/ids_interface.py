@@ -22,6 +22,7 @@ with suppress_stdout():
     import traceback #Module for finding Exception causes more easily
     from datetime import datetime
     import numpy as np
+    import ctypes
 
     import cam_image
 
@@ -139,6 +140,7 @@ class Connection:
             traceback.print_exc(e)
             return False
         
+        
     def node(self, name:str) -> ids_peak.Node:
         """A shortcut for "self.nodemap.FindNode([node])".
         Retrieves a device node to query, set, or give a command
@@ -217,9 +219,9 @@ class Connection:
         if auto:
             image = self.capture_auto_exposure()
         else:
-            image = self.single_frame_acquisition()
+            image = self.single_frame_acquisition()['image']
         
-        image = self.create_cam_image(image)
+        image = self.create_cam_image(image, auto=auto)
         
         return image
         
@@ -234,13 +236,13 @@ class Connection:
                 image = None
                 while not image_correctly_exposed:
                     
-                    image = self.single_frame_acquisition() #Capture image from device with current integration time setting
+                    image = self.single_frame_acquisition()['image'] #Capture image from device with current integration time setting
                     target_fraction = 0.01 #The target fraction of pixels to be oversaturated. 
                     target_margin = 0.005 #Images with fraction of pixel saturated above or below this margin are incorrectly exposed
                     
                     
                     circle_mask = cam_image.create_centre_mask(image, centre=[1226, 1034], radius=472)
-                    fraction_white = cam_image.get_fraction_white_pixels(image, mask=circle_mask)
+                    fraction_white = cam_image.get_fraction_white_pixels(image, mask=circle_mask, saturation_threshold=250)
                     overexposed_difference = target_fraction - fraction_white #Calculate how far the image is from correct saturation level
                     exposure_time = self.exposure_time()
                     
@@ -321,6 +323,7 @@ class Connection:
             self.start_acquisition()
 
             image = self.capture_frame()
+            
             
             self.stop_acquisition() #Just in case, as in SFA mode acquisition should stop automatically after capture
             
@@ -423,13 +426,13 @@ class Connection:
 
    
         
-    def capture_frame(self) -> cam_image.Cam_Image:
+    def capture_frame(self) -> np.ndarray:
         """Capture an image on the device. 
         Acquisition must be started.
         Flushes annd re-Queues buffers before capturing as they may be filled with images from when acquisition started.
         Gets camera settings for capture and other data, before creating and returning a Cam_Image object.
         Returns:
-            cam_image.Cam_Image: Image object with associated metadata.
+            np.ndarray
         """        
         try:
             
@@ -464,6 +467,7 @@ class Connection:
             # Create IDS peak IPL image and convert it to RGBa8 format
             ipl_image = ids_peak_ipl_extension.BufferToImage(buffer)
             
+            sharpness = get_sharpness(ipl_image)
             
             # Queue buffer so that it can be used again
             self.datastream.QueueBuffer(buffer)
@@ -484,7 +488,9 @@ class Connection:
             img = image_np_array.reshape(height,width)
 
             
-            return img.copy()
+            return {'image': img.copy(),
+                    'sharpness': sharpness}
+                    
 
         except Exception as e:
             traceback.print_exc(e)
@@ -680,12 +686,46 @@ class Connection:
         except Exception as e:
             traceback.print_exc(e)
             return False
-        
+    
+    def sharpness_test(self) -> float:
+        return self.single_frame_acquisition()['sharpness']
+    
     def printq(self, *args, **kwargs):
         """Only prints if Connection instance quiet mode is set to False
         """        
         if not self.quiet_mode:
             print(*args, **kwargs)
+      
+def get_sharpness(image:ids_peak_ipl.Image):
+    try:
+        
+        
+        x1 = 2448/2 - 200
+        y1 = 2048/2 - 200
+        x2 = x1 + 400
+        y2 = y1 + 400
+        x1 = ctypes.c_size_t(int(0))
+        y1 = ctypes.c_size_t(int(0))
+        x2 = ctypes.c_size_t(int(x2))
+        y2 = ctypes.c_size_t(int(y2))
+        
+        size = image.Width() - image.Width()
+        
+        rect = ids_peak_ipl.Rect2D(ids_peak_ipl.Point2D.New(x = size, y=size), ids_peak_ipl.Size2D.New(width=image.Width(), height=image.Height()))
+        
+        #rect = ids_peak_ipl.Rect2D(x1, y1, x2, y2)
+
+        sharp_calc = ids_peak_ipl.Sharpness()
+        sharp_calc.SetROI(rect)
+        
+        
+        sharpness = sharp_calc.Measure(image)
+    
+        return sharpness
+    except Exception as e:
+        traceback.print_exc(e)
+        return None
+    
                 
 def get_depth() ->float|bool:
     """Dummy function to simulate checking for depth at time of image capture.
