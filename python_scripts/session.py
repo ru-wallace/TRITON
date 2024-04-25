@@ -64,8 +64,7 @@ class Session:
                                 "images" : images
                                 }
             self.write_to_log()
-        
-            
+
                 
             
             
@@ -107,6 +106,21 @@ class Session:
             
             self.log["images"].append(image_info)
             self.write_to_log()
+            
+            try:
+                session_dict = None
+                with open(self.directory_path / 'session_list.json', 'r') as session_list_file:
+                    session_dict = json.load(session_list_file)
+                
+                session_dict[self.name]["images"] = image_num
+                if session_dict is not None:
+                    with open(self.directory_path / 'session_list.json', 'w') as session_list_file:   
+                        json.dump(session_dict, session_list_file, indent=5)
+                
+            except Exception as e:
+                print("Error updating session_list.json - check it exists")
+                traceback.print_exc(e)
+                
             return True
     
         except Exception as e:
@@ -365,3 +379,24 @@ def from_file(path:str|Path) -> Session:
     except Exception as e:
         traceback.print_exc(e)
         return None
+    
+def create_sessions_list(directory:str|Path):
+    if isinstance(directory, str):
+        directory = Path(directory)
+    list_file = directory / "session_list.json"
+    
+    if list_file.exists():
+        return True
+
+    #TODO: check for existing sessions in subfolders
+    def create_file():
+
+        with open(list_file, "w") as file:
+            file.write("{}")
+        return True
+ 
+    
+
+    return create_file()
+
+    
