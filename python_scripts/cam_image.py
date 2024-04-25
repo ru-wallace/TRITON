@@ -15,7 +15,7 @@ import luminance
 
 class Cam_Image:
     
-    def __init__(self, image:np.ndarray, timestamp:datetime, integration_time:int, auto:bool, gain:float, depth:float, cam_temp:float, sensor_temp:float, format:str) -> None:
+    def __init__(self, image:np.ndarray, timestamp:datetime, integration_time:int, auto:bool, gain:float, depth:float, cam_temp:float, sensor_temp:float, format:str, saturation_threshold:int=255) -> None:
         """Create Cam_Image object which contains an Image and a combination of pre-set and calculated metadata.
 
         Args:
@@ -33,6 +33,7 @@ class Cam_Image:
             #Assume image mode is L (greyscale) unless the format is BayerRG8
             mode="L"
             
+            saturation_threshold = 250
             
             processed_colour_image = image
             #Debayer (demosaic) image using cv2 colour conversion function
@@ -86,9 +87,9 @@ class Cam_Image:
             #If the image is monochrome, the image pixels are just relative luminance scaled to 255 so can use this if we apply a mask.
             #If RGB, we use the IEC process as implemented in the luminance module to calculate relative luminance.        
             if format == "Mono8":
-                self._relative_luminance = get_average_for_channels(self._image, mask=centre_mask)[0]/255
+                self._relative_luminance = get_average_for_channels(self._image, mask=centre_mask, saturation_threshold=saturation_threshold)[0]/255
             else:
-                self._relative_luminance = luminance.calc_relative_luminance(self._image, mask=centre_mask)
+                self._relative_luminance = luminance.calc_relative_luminance(self._image, mask=centre_mask, saturation_threshold=saturation_threshold)
                 
                 
             #Calculate the unscaled absolute luminance using the IEC defined process.
@@ -103,14 +104,14 @@ class Cam_Image:
                                                                                 )
             
             #Calculate the average pixel value for each channel and fraction of all pixels saturated in the active circle
-            self._inner_fraction_white = get_fraction_white_pixels(image, mask=centre_mask)
+            self._inner_fraction_white = get_fraction_white_pixels(image, mask=centre_mask, saturation_threshold=saturation_threshold)
             self._inner_avgs :tuple[float]= get_average_for_channels(self._image, mask=centre_mask)
             
             #Generate a mask which will hide the centre circle, plus a margin to avoid the majority of light bleed
             outer_mask = create_centre_mask(image, centre=centre, radius=radius+100)
             
             #Calculate the average pixel value for each channel and fraction of all pixels saturated in the outer dark area
-            self._outer_fraction_white = get_fraction_white_pixels(image, mask=outer_mask, invert_mask = True)
+            self._outer_fraction_white = get_fraction_white_pixels(image, mask=outer_mask, invert_mask = True, saturation_threshold=saturation_threshold)
             self._outer_avgs:tuple[float] = get_average_for_channels(self._image, mask=outer_mask, invert_mask = True)
             
             
@@ -118,8 +119,9 @@ class Cam_Image:
             corner_mask = create_corner_mask(image=image, radius=200)
             
             #Calculate the average pixel value for each channel and fraction of all pixels saturated in the corners
+            self._corner_fraction_white = get_fraction_white_pixels(image, mask=corner_mask, saturation_threshold=saturation_threshold)
             self._corner_avgs: tuple[float]= get_average_for_channels(self._image, mask=corner_mask)
-            self._corner_fraction_white = get_fraction_white_pixels(image, mask=corner_mask)
+
             
         except Exception as e:
             traceback.print_exc(e)
@@ -349,7 +351,7 @@ def create_metadata(image:Cam_Image) ->PngInfo:
         traceback.print_exc(e)     
         
         
-def get_fraction_white_pixels(image: np.ndarray, mask: Image.Image = None, invert_mask:bool=False, threshold:int=250) -> float:
+def get_fraction_white_pixels(image: np.ndarray, mask: Image.Image = None, invert_mask:bool=False, saturation_threshold:int=255) -> float:
   
     """Find the fraction of pixels which have a value greater than the threshold. Threshold is 250 by default.
 
@@ -378,7 +380,7 @@ def get_fraction_white_pixels(image: np.ndarray, mask: Image.Image = None, inver
             
         total_pixels = image.size
         
-        number_white += np.count_nonzero(image > threshold) #create boolean array that is true when average of colour values is greater than 250
+        number_white += np.count_nonzero(image > saturation_threshold) #create boolean array that is true when average of colour values is greater than 250
 
         fraction_white = number_white/total_pixels
         return fraction_white
@@ -386,7 +388,7 @@ def get_fraction_white_pixels(image: np.ndarray, mask: Image.Image = None, inver
     except Exception as e:
         traceback.print_exception(e)
             
-def get_average_for_channels(image:Image.Image, mask:Image.Image=None, invert_mask:bool = False) ->tuple[float]:
+def get_average_for_channels(image:Image.Image, mask:Image.Image=None, invert_mask:bool = False, saturation_threshold:int=255) ->tuple[float]:
     """Calculate the average pixel value for each channel. If a mask if provided, calculates for only active area.
 
     Args:
@@ -413,7 +415,12 @@ def get_average_for_channels(image:Image.Image, mask:Image.Image=None, invert_ma
     mean_value = []
     for channel in image.split():
         channel_array = np.array(channel)
-        channel_mean = np.mean(channel_array[mask])
+        saturation_mask = channel_array <= saturation_threshold
+        channel_array = channel_array[np.logical_and(mask, saturation_mask)]
+        if channel_array.size == 0:
+            channel_mean = 255.0
+        else:
+            channel_mean = np.mean(channel_array)
         mean_value.append(round(channel_mean, 3))
     
     return tuple(mean_value)
