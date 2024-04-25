@@ -70,6 +70,9 @@ class Session:
             
         except Exception as e:
             traceback.print_exc(e)
+    
+    def session_directory(self) -> Path:
+        return self.directory_path / f"{self.name.replace(' ', '_')}"
                         
     def time_string(self, format:str="%Y-%m-%d %H:%M:%S") -> str:
         return datetime.strftime(self.start_time, format)
