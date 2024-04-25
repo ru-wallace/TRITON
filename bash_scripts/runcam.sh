@@ -36,26 +36,27 @@ while [[ $# -gt 0 ]]; do
             RUNCAM_STATUS=$(timeout 3 cat "$PIPE_OUT_FILE")
             echo -en "\e[K"
             if [ -z "${RUNCAM_STATUS}" ]; then
-                echo "No Runcam processes detected"
+                echo -e "\rNo Runcam processes detected"
             else
-                echo "Status: $RUNCAM_STATUS"
+                echo -e "\rStatus: $RUNCAM_STATUS"
             fi
             exit 0
             ;;
         -x|--stop)
             echo -n "Checking for process..."
             RUNCAM_STATUS=$(timeout 3 cat "$PIPE_OUT_FILE")
-            echo -en "\e[K"
             if [ -z "${RUNCAM_STATUS}" ]; then
-                echo "No Runcam processes detected"
+                echo -e "\rNo Runcam processes detected"
                 exit 0
             fi
-            echo "Process found:"
+            echo -e "\rProcess found:\e[K"
             echo "$RUNCAM_STATUS"
             echo "Stopping Process..."
-            echo "STOP" > "$PIPE_IN_FILE" &
+            echo -n "STOP" > "$PIPE_IN_FILE" &
+            sleep .5
             STOP_STATUS=$(timeout 3 cat "$PIPE_OUT_FILE")
-
+            
+            echo "Stopping: $STOP_STATUS"
             if [ "$STOP_STATUS" = "STOPPING" ]; then
                 echo "Process Successfully Stopped"
             else
