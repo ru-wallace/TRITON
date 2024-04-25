@@ -3,7 +3,6 @@
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 BASE_DIR="$(dirname "$SCRIPT_DIR")"
 
-echo "BASE_DIR: $BASE_DIR"
 
 if [ -f "$BASE_DIR/python_scripts/.env" ]
     then # load environment variables from .env file
@@ -24,18 +23,62 @@ conda activate ids_device
 # Parse options
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -c|--console|-i|--interactive)
+        -c|--console)
             python "$BASE_DIR/python_scripts/console_interface.py"
             exit 0
             ;;
+        -t|--test)
+            python "$BASE_DIR/python_scripts/get_sharpness.py"
+            exit 0
+            ;;
+        -q|--query)
+            echo -n "Checking for process..."
+            RUNCAM_STATUS=$(timeout 3 cat "$PIPE_OUT_FILE")
+            echo -en "\e[K"
+            if [ -z "${RUNCAM_STATUS}" ]; then
+                echo "No Runcam processes detected"
+            else
+                echo "Status: $RUNCAM_STATUS"
+            fi
+            exit 0
+            ;;
+        -x|--stop)
+            echo -n "Checking for process..."
+            RUNCAM_STATUS=$(timeout 3 cat "$PIPE_OUT_FILE")
+            echo -en "\e[K"
+            if [ -z "${RUNCAM_STATUS}" ]; then
+                echo "No Runcam processes detected"
+                exit 0
+            fi
+            echo "Process found:"
+            echo "$RUNCAM_STATUS"
+            echo "Stopping Process..."
+            echo "STOP" > "$PIPE_IN_FILE" &
+            STOP_STATUS=$(timeout 3 cat "$PIPE_OUT_FILE")
 
+            if [ "$STOP_STATUS" = "STOPPING" ]; then
+                echo "Process Successfully Stopped"
+            else
+                echo "Failed to stop process"
+                exit 0
+            fi
+
+            
+            
+            
+            exit 0
+            ;;
+        
         -h|--help)
             echo "Usage: $0 [OPTIONS]"
             echo "Options:"
-            echo "  -h, --help                          Show this help message"
-            echo "  -r, --routine FILE                  Specify a routine file. The ./routines directory in IDS directory will be looked at if full path not specified"
-            echo "  -s, --session                       Specify session name"
-            echo "  -c, --console , -i, --interactive   Open Console Interface for Camera"
+            echo "  -h, --help              Show this help message"
+            echo "  -r, --routine FILE      Specify a routine file. The ./routines directory in IDS directory will be looked at if full path not specified"
+            echo "  -s, --session           Specify session name"
+            echo "  -f, --focus             Test Focus of camera"
+            echo "  -c, --console           Open Console Interface for Camera"
+            echo "  -q, --query             Check for current runcam process"
+            echo "  -x, --stop              Stop current running sessions"
             exit 0
             ;;
         -r|--routine)
@@ -58,7 +101,7 @@ while [[ $# -gt 0 ]]; do
             ;;
             
         *)
-            echo "Error: Unknown option $1" >&2
+            echo "Error: Unknown option $1 - Use runcam -h or --help for commands" >&2
             exit 1
             ;;
     esac
