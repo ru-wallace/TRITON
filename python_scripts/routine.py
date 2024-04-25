@@ -100,7 +100,7 @@ class Routine:
         self.complete = False
         self.last_time_printed=0
         self.capturing_image=False
-        
+        self.stop_signal = False
 
         
         
@@ -150,9 +150,8 @@ class Routine:
         print(f"{round(time.time()-self.start_time, 2)}s ==> Capturing Img #{self.image_count+1} ~ I:{int_string} | G: {gain}dB")
         try:
                     
-            capture = self.capture_function(integration_time, gain, auto)
-            if capture:
-                self.image_count += 1
+            self.capture_function(integration_time, gain, auto)
+            self.image_count += 1
         except Exception as e:
             traceback.print_exc(e)
         finally:
@@ -176,6 +175,10 @@ class Routine:
         
         def tick_outcome(value:bool=True):
             return({"complete": value})
+        if self.stop_signal:
+            if not self.capturing_image:
+                self.complete = True
+            return
         
         if self.start_time is None:
             self.start_time = time.time()
@@ -196,7 +199,8 @@ class Routine:
             
         if not self.complete:
             self.complete = self.image_count >= len(self.int_times) and not self.capturing_image
-              
+        
+        
         if self.complete:
             print("Routine Complete")
             return tick_outcome(True)  
@@ -204,7 +208,7 @@ class Routine:
         
           
             
-        if now > self.next_capture and not self.capturing_image:
+        if now > self.next_capture and not self.capturing_image and not self.stop_signal:
             captured_image = self.start_capture_thread(self.int_times[self.image_count], self.gains[self.image_count])
             
         
