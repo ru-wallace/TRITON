@@ -67,7 +67,7 @@ def lin_sRGB_to_XYZ(colour : list[float]|tuple[float]|np.ndarray) -> tuple[float
     return xyz
 
 
-def calc_relative_luminance(image : Image.Image | np.ndarray, mask: Image.Image|np.ndarray = None) -> float:
+def calc_relative_luminance(image : Image.Image | np.ndarray, mask: Image.Image|np.ndarray = None, saturation_threshold:int=255) -> float:
     """Calculate relative luminance of an image in Candela per Sq. Meter (cd/m^2)
 
     Args:
@@ -93,8 +93,13 @@ def calc_relative_luminance(image : Image.Image | np.ndarray, mask: Image.Image|
         mask_cond= np.array(mask) == 255
     else:
         mask_cond = np.full(image_array.shape[:-1], True)
-            
-    mean_lin = np.array([np.mean(channel[mask_cond]) for channel in lin_array.transpose(2,0,1)]) #Get mean for each linearised channel
+        
+    def get_mean(channel, saturation_threshold):
+        masked_channel = channel[np.logical_and(mask_cond, channel <= saturation_threshold)]
+        if masked_channel.size == 0:
+            return 255.0
+        return np.mean(masked_channel)
+    mean_lin = np.array([get_mean(channel, saturation_threshold) for channel in lin_array.transpose(2,0,1)]) #Get mean for each linearised channel
 
     xyz = lin_sRGB_to_XYZ(mean_lin)
     relative_luminance = xyz[1]
@@ -104,7 +109,7 @@ def calc_relative_luminance(image : Image.Image | np.ndarray, mask: Image.Image|
 
 
 
-def calc_unscaled_absolute_luminance(image : Image.Image, integration_time : float, aperture : float,  speed : float, speed_format : str = ISO, mask:Image.Image=None, relative_luminance:float=None) -> float:
+def calc_unscaled_absolute_luminance(image : Image.Image, integration_time : float, aperture : float,  speed : float, speed_format : str = ISO, mask:Image.Image=None, relative_luminance:float=None, saturation_threshold:int=255) -> float:
     """Calculate Unscaled Absolute Luminance
         Uses ISO2720:1974 procedure to calculate the unscaled absolute luminance of an image using the aperture, integration, and sensor speed
         Sensore speed may be in Gain or ISO format
@@ -151,7 +156,7 @@ def calc_unscaled_absolute_luminance(image : Image.Image, integration_time : flo
         speed_iso = speed
         
     if relative_luminance is None:
-        relative_luminance = calc_relative_luminance(image, mask)
+        relative_luminance = calc_relative_luminance(image, mask, saturation_threshold=saturation_threshold)
     
     # Using ISO2720:1974 - N^2 / t = ( L * S ) / K
     # ==> L / K = N^2 / (S * t)
