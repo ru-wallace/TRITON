@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 import sys,os
+import warnings
 
 
 @contextmanager
@@ -25,6 +26,46 @@ with suppress_stdout():
     import ctypes
 
     import cam_image
+    
+class Resources:
+    #Pixel Formats
+    MONO8 = ids_peak_ipl.PixelFormatName_Mono8
+    MONO10 = ids_peak_ipl.PixelFormatName_Mono10
+    MONO12 = ids_peak_ipl.PixelFormatName_Mono12
+    RGB8 = ids_peak_ipl.PixelFormatName_RGB8
+    BGR8 = ids_peak_ipl.PixelFormatName_BGR8
+
+
+    BAYER_RG8 = ids_peak_ipl.PixelFormatName_BayerRG8
+    BAYER_RG12 = ids_peak_ipl.PixelFormatName_BayerRG12
+    BAYER_BG8 = ids_peak_ipl.PixelFormatName_BayerBG8
+    BAYER_BG12 = ids_peak_ipl.PixelFormatName_BayerBG12
+    BAYER_GR8 = ids_peak_ipl.PixelFormatName_BayerGR8
+    BAYER_GR12 = ids_peak_ipl.PixelFormatName_BayerGR12
+    BAYER_GB8 = ids_peak_ipl.PixelFormatName_BayerGB8
+    BAYER_GB12 = ids_peak_ipl.PixelFormatName_BayerGB12
+    
+    
+    #Return Types
+    BUFFER = "buffer"
+    """ids_peak.Buffer object"""
+    CAM_IMAGE = "cam_image"
+    """cam_image.Cam_Image object"""
+    NDARRAY = "nd_array"
+    """numpy.ndarray Object"""
+    IPL_IMAGE = "ipl_image"
+    """ids_peak_ipl.Image  Object"""
+    
+    
+    #Sharpness Algorithms
+    SHARPNESS_ALGORITHM_SOBEL = ids_peak_ipl.Sharpness.SharpnessAlgorithm_Sobel
+    """ contrast-based sharpness algorithm (convolution)"""
+    SHARPNESS_ALGORITHM_MEAN_SCORE = ids_peak_ipl.Sharpness.SharpnessAlgorithm_MeanScore
+    """contrast-based sharpness algorithm (mean value)"""
+    SHARPNESS_ALGORITHM_HISTOGRAM_VARIANCE = ids_peak_ipl.Sharpness.SharpnessAlgorithm_HistogramVariance
+    """ statistics-based sharpness algorithm"""
+    SHARPNESS_ALGORITHM_TENENGRAD = ids_peak_ipl.Sharpness.SharpnessAlgorithm_Tenengrad
+    """ contrast-based sharpness algorithm (convolution)"""
 
 class Connection:
 
@@ -236,7 +277,7 @@ class Connection:
                 image = None
                 while not image_correctly_exposed:
                     
-                    image = self.single_frame_acquisition()['image'] #Capture image from device with current integration time setting
+                    image = self.single_frame_acquisition() #Capture image from device with current integration time setting
                     target_fraction = 0.01 #The target fraction of pixels to be oversaturated. 
                     target_margin = 0.005 #Images with fraction of pixel saturated above or below this margin are incorrectly exposed
                     
@@ -424,9 +465,9 @@ class Connection:
             return False
     
 
-   
+    
         
-    def capture_frame(self) -> np.ndarray:
+    def capture_frame(self, return_type=Resources.NDARRAY) -> np.ndarray|ids_peak_ipl.Image|cam_image.Cam_Image:
         """Capture an image on the device. 
         Acquisition must be started.
         Flushes annd re-Queues buffers before capturing as they may be filled with images from when acquisition started.
@@ -441,7 +482,7 @@ class Connection:
 
             buff_time=max(2000, int(self.exposure_time()/1000)+500)
 
-            if self.node("AcquisitionMode").CurrentEntry().SymbolicValue() in ["MultiFrame", "Continuous"]:
+            if self.node("AcquisitionMode").CurrentEntry().SymbolicValue() in ["MultiFrame", "Continuous"] and False:
                 self.printq("Flushing buffers")
                 # Get buffer from device's datastream      
                 #Flush previous buffers that may have taken images a while ago
@@ -467,10 +508,15 @@ class Connection:
             # Create IDS peak IPL image and convert it to RGBa8 format
             ipl_image = ids_peak_ipl_extension.BufferToImage(buffer)
             
-            sharpness = get_sharpness(ipl_image)
+            
             
             # Queue buffer so that it can be used again
             self.datastream.QueueBuffer(buffer)
+            
+            if return_type == Resources.IPL_IMAGE:
+                return ipl_image
+            
+            
             # Get raw image data from converted image and construct a QImage from it
             image_np_array = ipl_image.get_numpy_1D()
 
@@ -487,10 +533,13 @@ class Connection:
                 
             img = image_np_array.reshape(height,width)
 
+            if return_type == Resources.NDARRAY:
+                return img.copy()
             
-            return {'image': img.copy(),
-                    'sharpness': sharpness}
-                    
+            if return_type == Resources.CAM_IMAGE:
+                return self.create_cam_image(img.copy())
+            
+
 
         except Exception as e:
             traceback.print_exc(e)
@@ -510,6 +559,7 @@ class Connection:
             int: _description_
         """    
         try:
+            current_pixel_format = self.node("PixelFormat").CurrentEntry().SymbolicValue()
             if seconds is not None:
                 if microseconds is None:
                     microseconds=int(seconds*1000000) #Convert seconds to microseconds
@@ -536,13 +586,7 @@ class Connection:
                 new_time = max(min_exp, min(max_exp, microseconds))
                 self.node("ExposureTime").SetValue(new_time)
                 
-                
-                if self.mono:
-                    self.printq("Setting format to Mono8")
-                    self.node("PixelFormat").SetCurrentEntry("Mono8")
-                else:
-                    self.printq("Setting format to BayerRG8")
-                    self.node("PixelFormat").SetCurrentEntry("BayerRG8")
+                self.node("PixelFormat").SetCurrentEntry(current_pixel_format)
             
             current_time=int(self.node("ExposureTime").Value())
             self.printq("Exposure Time: ", current_time)
@@ -682,7 +726,7 @@ class Connection:
                     self.node(node_name).SetCurrentEntry("Off")
                     return True
                 except Exception as e:
-                    print(f"Could not set value of node '{node_name}'")
+                    self.printq(f"Could not set value of node '{node_name}'")
         except Exception as e:
             traceback.print_exc(e)
             return False
@@ -695,38 +739,117 @@ class Connection:
         """        
         if not self.quiet_mode:
             print(*args, **kwargs)
-      
-def get_sharpness(image:ids_peak_ipl.Image):
-    try:
-        
-        
-        x1 = 2448/2 - 200
-        y1 = 2048/2 - 200
-        x2 = x1 + 400
-        y2 = y1 + 400
-        x1 = ctypes.c_size_t(int(0))
-        y1 = ctypes.c_size_t(int(0))
-        x2 = ctypes.c_size_t(int(x2))
-        y2 = ctypes.c_size_t(int(y2))
-        
-        size = image.Width() - image.Width()
-        
-        rect = ids_peak_ipl.Rect2D(ids_peak_ipl.Point2D.New(x = size, y=size), ids_peak_ipl.Size2D.New(width=image.Width(), height=image.Height()))
-        
-        #rect = ids_peak_ipl.Rect2D(x1, y1, x2, y2)
 
-        sharp_calc = ids_peak_ipl.Sharpness()
-        sharp_calc.SetROI(rect)
-        
-        
-        sharpness = sharp_calc.Measure(image)
+def make_ROI_start_centre(image:ids_peak_ipl.Image, centre:tuple[int]=None, size:int|tuple[int]=None) -> ids_peak_ipl.Rect2D:
+
+    if size is None:
+       return ids_peak_ipl.Rect2D(ids_peak_ipl.Point2D.New(x = 0, y=0), ids_peak_ipl.Size2D.New(width=image.Width(), height=image.Height())) 
     
-        return sharpness
+    if isinstance(size, int):
+        size = (size, size)
+    
+    print("Size: ", size)
+    
+    if centre is None:
+        centre = (image.Width()/2, image.Height()/2)
+        
+    top_left = (int(centre[0] - size[0]/2),int(centre[1] - size[1]/2))
+    
+    print("Top Left: ", top_left)
+    
+    
+    if top_left[0] + size[0] > image.Width() or top_left[1] + size[1] > image.Height() or min(top_left) < 0:
+         raise ValueError((f"ROI rectangle does not fit in image\n" 
+                           f"Image size:{image.Width()}x{image.Height()}\n"
+                           f"Rectangle bounds: Left: {top_left[0]} Top: {top_left[1]} Right: {top_left[0]+size[0]} Bottom: {top_left[1]+size[1]}"))
+
+    
+    return ids_peak_ipl.Rect2D(ids_peak_ipl.Point2D.New(x = top_left[0], y=top_left[1]), ids_peak_ipl.Size2D.New(width=size[0], height=size[1]))
+    
+
+
+def make_ROI_start_top_left(image:ids_peak_ipl.Image=None, start_point:tuple[int]=(0,0), size:int|tuple[int]=None) -> ids_peak_ipl.Rect2D:
+    
+
+    top_left = start_point
+    
+    if size is None:
+        size = (image.Width() - top_left[0], image.Height() - top_left[1])
+           
+    if isinstance(size, int):
+        size = (size, size)
+
+    if min(top_left) < 0:
+        raise ValueError(f"Start point coordinates must be zero or greater - Coordinates given: {top_left}")
+            
+    if top_left[0] + size[0] > image.Width() or top_left[1] + size[1] > image.Height():
+        raise ValueError(f"ROI rectangle does not fit in image\nImage size:{image.Width()}x{image.Height()}\nRectangle bounds: Left: {top_left[0]} Top: {top_left[1]} Right: {top_left[0]+size[0]} Bottom: {top_left[1]+size[1]}")
+    
+    return ids_peak_ipl.Rect2D(ids_peak_ipl.Point2D.New(x = top_left[0], y=top_left[1]), ids_peak_ipl.Size2D.New(width=size[0], height=size[1]))
+
+def get_ROI_bounds(roi: ids_peak_ipl.Rect2D) -> tuple[int]:
+    """
+    Get the bounds of the Region of Interest (ROI).
+
+    Args:
+        roi (ids_peak_ipl.Rect2D): The ROI object.
+
+    Returns:
+        tuple[int]: A tuple containing the left, top, right, and bottom coordinates of the ROI.
+
+    """
+    return (roi.left(), roi.top(), roi.right(), roi.bottom())
+
+
+
+def make_ROI_from_bounds(left:int, top:int, right:int, bottom:int) -> ids_peak_ipl.Rect2D:
+    """
+    Create a Rect2D object using left, top, right, and bottom bounds.
+
+    Args:
+        left (int): The left coordinate of the ROI.
+        top (int): The top coordinate of the ROI.
+        right (int): The right coordinate of the ROI.
+        bottom (int): The bottom coordinate of the ROI.
+
+    Returns:
+        ids_peak_ipl.Rect2D: The Rect2D object representing the ROI.
+    """
+    return ids_peak_ipl.Rect2D(ids_peak_ipl.Point2D.New(x=left, y=top), ids_peak_ipl.Size2D.New(width=right-left, height=bottom-top))
+      
+def calculate_sharpness(image:ids_peak_ipl.Image, roi:ids_peak_ipl.Rect2D=None, algorithm=ids_peak_ipl.Sharpness.SharpnessAlgorithm_Sobel)->float:
+    """Calculates image sharpness using the IDS IPL library. 
+    
+    Default algorithm is Sobel Convolution. 
+    See IDS docs for algorithm details
+
+    Args:
+        image (ids_peak_ipl.Image): IPL image to be processed
+        roi (ids_peak_ipl.Rect2D, optional): Region of Interest where sharpness will be calculated - Leave as None to make region full image, or create with make_ROI_start_top_left() or make_ROI_start_centre(). Defaults to None.
+
+    Returns:
+        float: _description_
+    """    
+    try:
+
+        if roi is None:
+            roi = make_ROI_start_top_left(image)
+        sharp_calc = ids_peak_ipl.Sharpness()
+        sharp_calc.SetROI(roi)
+        
+        image.ConvertTo(ids_peak_ipl.PixelFormatName_Mono8)
+        
+        return sharp_calc.Measure(image)
+    
+    
     except Exception as e:
         traceback.print_exc(e)
         return None
     
-                
+def convert_image(image:ids_peak_ipl.Image, target_format:str)->ids_peak_ipl.Image:    
+        return image.ConvertTo(target_format)
+        
+        
 def get_depth() ->float|bool:
     """Dummy function to simulate checking for depth at time of image capture.
     May be removed to be implemented in other modules as it is not directly related
