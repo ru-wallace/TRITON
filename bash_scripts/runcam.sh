@@ -27,7 +27,7 @@ while [[ $# -gt 0 ]]; do
             python "$BASE_DIR/python_scripts/console_interface.py"
             exit 0
             ;;
-        -t|--test)
+        -f|--focus)
             python "$BASE_DIR/python_scripts/get_sharpness.py"
             exit 0
             ;;
