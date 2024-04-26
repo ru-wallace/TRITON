@@ -392,7 +392,7 @@ def main():
                     message = f"Routine: {current_routine.name}\nSession: {current_session.name}\nRuntime: {str(timedelta(seconds=int(current_routine.run_time)))}\nImages Captured: {current_routine.image_count}"
                     if current_routine.stop_signal:
                         message  += "STOPPING\n"
-                    write_to_pipe()
+                    write_to_pipe(message)
 
                 tick_result = current_routine.tick()
                 complete = current_routine.complete
