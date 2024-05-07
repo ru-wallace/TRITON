@@ -104,7 +104,7 @@ class Routine:
 
         
         
-    def to_string(self, print_string:bool=False):
+    def __str__(self):
         string = ""
         string += f"Routine: {self.name}"
         string += f"\nInitial delay: {self.initial_delay}s"
@@ -119,11 +119,7 @@ class Routine:
         string += f"\nGain settings: { (str(self.gains[:7]).strip(']') + '...]') if len(str(self.gains)) > 10 else str(self.gains)}"
         string += f"\nPlanned Image total: {self.int_times.size}"
         string += f"\nTime Estimate: {datetime.fromtimestamp(time.time() + self.expected_time).strftime('%Y-%m-%d %H:%M:%S')} ({str(timedelta(seconds=self.expected_time))})"
-        if self.tick_length != 0.01:
-            string += f"\nTick length: {self.tick_length}"
-        string+="\n"
-        if print_string:
-            print(string)
+        string += f"\nTick length: {self.tick_length}"
         return string
     
     def start_capture_thread(self, integration_time, gain):

@@ -39,6 +39,10 @@ def main():
     
     current_session: session.Session = None
     current_routine: routine.Routine = None
+    
+    
+
+        
     def print_and_log(*args, **kwargs):
         """Function for logging output of this script. If this is run from a systemd service the output should go to the RPi logs 
         to be read with journalctl, but this also writes to a file in the session which is loaded. If there is no session loaded 
@@ -48,7 +52,11 @@ def main():
                 
             str_args = ""
             for arg in args:
-                str_args+=str(arg)
+                if isinstance(arg, str):
+                    str_args+=arg
+                else:
+                    str_args+=str(arg)
+
             
             nonlocal stored_strings
             print(*args, **kwargs)
@@ -61,14 +69,20 @@ def main():
                 
             else:
                 stored_strings.append([str_args, datetime.now()])
-            
         except Exception as e: 
             #print(f"stderr: {sys.stderr}")
             #print(f"Kwargs: {kwargs} - Args: {args}", file=sys.stderr)
             print(traceback.format_exc(e), file=sys.stderr)
             #sys.exit("Error printing")
 
-
+    def log_error(error:Exception):
+        try:
+            traceback.print_exc(error, file=sys.stderr)
+            string = "".join(traceback.format_exception(error))
+            print_and_log(string)
+        except Exception as e:
+            traceback.print_exc(e, file=sys.stderr)
+        
 
     def central_log(*args):
         with open(DATA_DIR / "sessions" / "central_log.log", "a") as log_file:
@@ -77,10 +91,6 @@ def main():
             log_file.write(string)
 
           
-    def log_error(error:Exception):
-        with open(DATA_DIR / "sessions" / "error_log.log", "a") as err_file:
-            err_file.write("---------------------------------------------------")
-            err_file.write(traceback.format_exc(error))
 
     def flush_stored_strings():
        nonlocal stored_strings 
@@ -104,9 +114,8 @@ def main():
             print_and_log("Could not connect to Device")
             sys.exit(1)
     except Exception as e:
-        print(traceback.format_exc(e), file=sys.stderr)
         print_and_log("Could not connect to Device")
-        print_and_log(traceback.format_exception(e))
+        log_error(e)
         sys.exit(1)
     
     try:
@@ -118,7 +127,7 @@ def main():
         sensor.setFluidDensity(ms5837.DENSITY_SALTWATER)
     except Exception as e:
         print_and_log("Could not connect to Pressure Sensor")
-        print_and_log(*traceback.format_exception(e))
+        log_error(e)
         sys.exit("Could not connect to Pressure Sensor")
     
     def get_depth(retry:bool=False) -> float:
@@ -169,7 +178,7 @@ def main():
             nonlocal current_routine
             
             exposure_time = device.exposure_time()/1e6
-            image_string = f"Capturing Image #{current_session.image_count + len(current_session.image_queue)}(Routine image#{current_routine.image_count}) - Integration Time : {integration_time_secs}s"
+            image_string = f"Capturing Image #{current_session.image_count + current_session.queue_length}(Routine image#{current_routine.image_count}) - Integration Time : {integration_time_secs}s"
             if auto:
                 image_string += "- Auto Exposure"
             print_and_log(image_string)
@@ -221,6 +230,11 @@ def main():
                         capture_successful = True
                 else:
                     capture_successful = True
+                    try: 
+                        test_err = ids_interface.calculate_new_exposure(current_exposure_time=image.integration_time/1e6)
+                    except Exception as e:
+                        log_error(e)
+                        
             
             print_and_log(f"Captured Image #{current_routine.image_count}")
             print_and_log(f"Timestamp: {image.time_string('%Y-%m-%d %H:%M:%S')}")
@@ -228,13 +242,10 @@ def main():
             
         except Exception as e:
             print_and_log(f"Error Capturing Image {current_routine.image_count}")
-            try:
-                print_and_log(traceback.format_exc(e))
-            except:
-                pass
+            log_error(e)
         
 
-    
+    print("Got here", file=sys.stderr)
 
     # Parse command line arguments
     args = parser.parse_args()
@@ -277,14 +288,13 @@ def main():
                         break
                 except Exception as e:
                     print_and_log(f"Routine file: {routine_dir}/{filename}")
-                    print_and_log(traceback.format_exc(e))
-                    print_and_log("###############")
+                    log_error(e)
                     continue
 
     #If no matching routine can be found, log an error and exit
     if current_routine is None:
         print_and_log(f"Routine {routine_name} does not exist.\nMake sure routine name has no spaces\n Exiting.")
-        log_error()
+        log_error(Exception("Routine not found"))
         sys.exit(1)
     
 
@@ -311,7 +321,7 @@ def main():
                     if session_path is not None and session_path.exists():
                         print_and_log("Session Exists")
                         current_session = session.from_file(session_path)
-                        current_session.print_info()
+                        print_and_log(f"{current_session}")
                 else:
                     #If the session is not in the list, make a new session with that name. Session info such as coordinates/location
                     # will have to be added later in the console interface
@@ -333,13 +343,16 @@ def main():
             print_and_log(f"New Session Created in {current_session.parent_directory}")
             
     except Exception as e:
-        print_and_log(traceback.format_exc(e))
+        log_error(e)
         flush_stored_strings()
         sys.exit("Exited - Could not open session")
   
+  
+  
+
             
     print_and_log(f"Running routine {current_routine.name}...")
-    print_and_log(current_routine.to_string())
+    print_and_log(str(current_routine))
     
     #Run routine loop
     #The routine uses a "tick" system. 
@@ -392,10 +405,12 @@ def main():
             pass
         except Exception as e:
             print_and_log("Error passing message to named pipe")
-            print_and_log(traceback.format_exc(e))
+            log_error(e)
         
     check_time_long = time()
     check_time_short = time()
+    
+    current_session.start_processing_queue()
     
     with os.fdopen(in_pipe_fd) as in_pipe:
         while not complete:
@@ -410,8 +425,6 @@ def main():
                         print_and_log("Received STOP Message")
                         if current_routine.capturing_image:
                             print_and_log("Waiting for image capture to finish...")
-                        elif current_session.busy:
-                            print_and_log("Waiting for image saving to finish...")
                         else: 
                             print_and_log("Stopping")
                         for i in range(10):
@@ -432,7 +445,7 @@ def main():
                 if time() - check_time_short > 1:
                     check_time_short = time()
                     try:
-                        message = f"Routine: {current_routine.name}\nSession: {current_session.name}\nRuntime: {str(timedelta(seconds=int(current_routine.run_time)))}\nImages Captured: {current_routine.image_count}\nImage Save Queue Size: {len(current_session.image_queue)}"
+                        message = f"Routine: {current_routine.name}\nSession: {current_session.name}\nRuntime: {str(timedelta(seconds=int(current_routine.run_time)))}\nImages Captured: {current_routine.image_count}\nImage Save Queue Size: {current_session.image_queue.qsize()}"
                         if current_routine.stop_signal:
                             message  += "\nSTOPPING\n"
                         write_to_pipe(message)
@@ -444,30 +457,25 @@ def main():
                 
                 
                 
-
-                current_session.image_processing_thread()
-                
-                complete = current_routine.complete and len(current_session.image_queue) == 0 and not current_session.busy 
+                complete = current_routine.complete
                 consecutive_error_count = 0
                 
                 
                 
             except Exception as e:
                 print_and_log("Tick Error")
-                print_and_log(traceback.format_exception(e))
+                log_error(e)
 
                 consecutive_error_count += 1
                 
-                print_and_log("Error count: ", consecutive_error_count)
+                print_and_log(f"Error count: {consecutive_error_count}")
                 if consecutive_error_count > 5:
                     print_and_log("Too many consecutive tick errors. Exiting")
                     
                     sys.exit("Too many consecutive tick errors.")
     print_and_log(f"Completion Reason: {current_routine.stop_reason}")
     device.stop_acquisition()
-    while current_session.busy:
-        sleep(0.5)
-    current_session.process_image_queue()
+    current_session.stop_processing_queue()
     print_and_log(f"Complete at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
     
 #Wrapper code for running this script.
