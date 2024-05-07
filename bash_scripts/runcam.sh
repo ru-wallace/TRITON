@@ -12,6 +12,10 @@ if [ -f "$BASE_DIR/python_scripts/.env" ]
     exit 1
 fi
 
+export LD_LIBRARY_PATH="$IDS_PEAK_DIR/lib:$LD_LIBRARY_PATH"
+export GENICAM_GENTL64_PATH="$IDS_PEAK_DIR/lib/ids/cti" 
+export GENICAM_GENTL32_PATH="$GENICAM_GENTL64_PATH"
+export PATH="$IDS_PEAK_DIR/bin:$PATH"
 
 ROUTINE_FILE=""
 SESSION_NAME=""
@@ -31,6 +35,43 @@ while [[ $# -gt 0 ]]; do
             python "$BASE_DIR/python_scripts/get_sharpness.py"
             exit 0
             ;;
+        
+        -n|--node)
+            if [ -n "$2" ]; then
+                NODE="$2"
+                shift 2
+            else
+                echo "Error: Argument for $1 is missing" >&2
+                exit 1
+            fi
+            ;;
+
+        --get)
+            if [ -n "$NODE" ]; then
+                echo "$(ids_devicecommand -n $NODE --get)"
+                exit 0
+            else
+                echo "Error: No Node Name. Use 'runcam --node [node name] --get | --set [value]"
+                exit 1
+            fi
+            ;;
+        --set)
+            if [ -n "$NODE" ]; then
+                if [ -n "$2" ]; then
+                    NODE="$2"
+                    shift 2
+                else
+                    echo "Error: Argument for $1 is missing" >&2
+                    exit 1
+            fi
+                echo "$(ids_devicecommand -n $NODE --set $VALUE)"
+                exit 0
+            else
+                echo "Error: No Node Name. Use 'runcam --node [node name] --get | --set [value]'"
+                exit 1
+            fi
+            ;;
+
         -q|--query)
             echo -n "Checking for process..."
             RUNCAM_STATUS=$(timeout 3 cat "$PIPE_OUT_FILE")
@@ -79,7 +120,9 @@ while [[ $# -gt 0 ]]; do
             echo "  -f, --focus             Test Focus of camera"
             echo "  -c, --console           Open Console Interface for Camera"
             echo "  -q, --query             Check for current runcam process"
-            echo "  -x, --stop              Stop current running sessions"
+            echo "  -n [ --node ] arg       Select node by name (e.g. -n "DeviceModelName")."
+            echo "      --get                   Get node value and print it (e.g. -n "ExposureTime" --get)."
+            echo "      --set arg               Set node value (e.g. -n "ExposureTime" --set "14000")."
             exit 0
             ;;
         -r|--routine)
@@ -100,13 +143,29 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             ;;
-            
+        --run)
+            if [ -n "$2" ]; then
+                PYTHON_SCRIPT="$2"
+                python "$PYTHON_SCRIPT"
+                exit 0
+            else
+                echo "Error: Argument for $1 is missing" >&2
+                exit 1
+            fi
+            ;;
         *)
             echo "Error: Unknown option $1 - Use runcam -h or --help for commands" >&2
             exit 1
             ;;
     esac
 done
+
+#Exit if node command has run
+if [ -n "$NODE" ]; then
+    exit 0
+fi
+
+
 
 if [ -z "$ROUTINE_FILE" ]; then
     echo "Error: Required argument -r/--routine is missing. Use runcam --help for help." >&2
@@ -121,14 +180,16 @@ fi
 
 
 
-if [ ! -f "$ROUTINE_FILE" ]; then
-    if [ ! -f "$DATA_DIRECTORY/routines/$ROUTINE_FILE" ]; then
-        echo "Routine File  '$ROUTINE_FILE' Does not exist"
-        exit 1
-    fi
+echo -n "Checking for already running process..."
+RUNCAM_STATUS=$(timeout 3 cat "$PIPE_OUT_FILE")
+if [ -z "${RUNCAM_STATUS}" ]; then
+    echo -e "\rNo Runcam processes detected  - Starting AEGIR            "
+else
+    echo -e "\rRuncam process already running:       "
+    echo "$RUNCAM_STATUS"
+    echo "Exiting..."
+    exit 1
 fi
-
-
 
 
 #For setting up IDS Peak libraries
@@ -152,4 +213,4 @@ disown -h $!
 
 echo "Capture started."
 
-cd -
+cd - >/dev/null
