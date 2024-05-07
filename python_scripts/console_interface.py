@@ -103,7 +103,7 @@ class Console_Interface:
         name_line = f"Session: {self.session.name} | {len(self.session.log['images'])} Images"
         
         info_line = f"Start Time: {self.session.time_string()}"
-        dir_line = f"Directory: {str(self.session.directory_path / self.session.name.replace(' ', '_'))}"
+        dir_line = f"Directory: {str(self.session.parent_directory / self.session.name.replace(' ', '_'))}"
         if self.session.coords != (None, None):
             info_line = f"{info_line} | Coords: {self.session.coords[0], self.session.coords[1]}"
         
@@ -415,7 +415,7 @@ class Console_Interface:
             self.sessions_dict.update({self.session.name: 
                                         {"start_time":self.session.time_string(),
                                          "coords" : self.session.coords,
-                                         "directory_path": str(self.session.directory_path),
+                                         "directory_path": str(self.session.parent_directory),
                                          "images" : 0
                                          }
                                         })
