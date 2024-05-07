@@ -445,7 +445,7 @@ def main():
                 
                 
 
-                current_session.process_image_queue_async()
+                current_session.image_processing_thread()
                 
                 complete = current_routine.complete and len(current_session.image_queue) == 0 and not current_session.busy 
                 consecutive_error_count = 0

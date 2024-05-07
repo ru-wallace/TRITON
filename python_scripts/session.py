@@ -7,6 +7,7 @@ import cam_image
 import sys, os
 from dotenv import load_dotenv
 import traceback
+import threading, queue
 
 from datetime import datetime
 
@@ -23,7 +24,7 @@ def redirect_output(fileobj):
         
 load_dotenv()
 
-SESSION_DIR =  Path(os.environ.get("DATA_DIRECTORY"))
+DATA_DIR =  Path(os.environ.get("DATA_DIRECTORY"))
 PRETTY_FORMAT = "%Y-%m-%d %H:%M:%S"
 FILEPATH_FORMAT = "%Y_%m_%d__%H_%M_%S"
         
@@ -38,108 +39,174 @@ class Session:
             else:
                 self.start_time = start_time 
             
+            
             if name is None or name == "":
                 self.name:str = f"session_{self.time_string(FILEPATH_FORMAT)}"
             else:
-                self.name:str = name
+                self.name:str = name.strip()
                 
+            self.name_no_spaces = self.name.replace(" ", "_")
             self.coords:tuple[float|None] = coords
                 
 
                 
             if directory is None:
-                self.directory_path :Path =SESSION_DIR / "sessions"
+                self.parent_directory :Path =DATA_DIR / "sessions"
             else:
-                self.directory_path :Path = Path(directory)
-            full_path = self.directory_path / self.name.replace(" ", "_")
+                self.parent_directory :Path = Path(directory)
+                
+            self.directory = self.parent_directory / self.name_no_spaces
+            self.image_directory = self.directory / "images"
+            self.csv_file_path = self.directory / "data.csv"
+            self.json_file_path = self.directory / "session.json"
+            self.session_list_file = self.parent_directory / "session_list.json"
             
-            full_path.mkdir(parents=True, exist_ok=True)
+            self.image_directory.mkdir(parents=True, exist_ok=True)
+                      
+           
+            self.images:list[cam_image.Cam_Image]=[]
             
             if images is None:
-                images = []
-            self.log : dict = {"session" : self.name,
-                                "start_time" : self.time_string(),
+                self.last_updated = self.start_time
+            else:
+                self.last_updated = datetime.strptime(max(images, key= lambda image: int(image['number']))['time'], PRETTY_FORMAT)
+                self.images = images
+                
+            
+            self.log : dict = {"name" : self.name,
+                                "start_time" : self.start_time.strftime(PRETTY_FORMAT),
+                                "last_updated": self.last_updated.strftime(PRETTY_FORMAT),
                                 "coords" : str(self.coords[0])+", " + str(self.coords[1]),
-                                "path" : str(self.directory_path),
+                                "path" : str(self.directory),
                                 "images" : images
                                 }
-            self.write_to_log()
-
+            
                 
+            self.write_to_log()
+            
+            self.image_queue:queue.Queue = queue.Queue()
+            self.processing_images = False   
             
             
         except Exception as e:
             traceback.print_exc(e)
     
+    @property
+    def details(self) -> dict:
+        return {"name" : self.name,
+                    "start_time" : self.start_time.strftime(PRETTY_FORMAT),
+                    "last_updated": self.last_updated.strftime(PRETTY_FORMAT),
+                    "coords" : str(self.coords[0])+", " + str(self.coords[1]),
+                    "path" : str(self.directory),
+                    "images" : self.image_count
+                    
+                    }
+    
+    
+    
     def session_directory(self) -> Path:
-        return self.directory_path / f"{self.name.replace(' ', '_')}"
+        return self.parent_directory / f"{self.name.replace(' ', '_')}"
                         
     def time_string(self, format:str="%Y-%m-%d %H:%M:%S") -> str:
         return datetime.strftime(self.start_time, format)
+    
+    def add_image(self, image:cam_image.Cam_Image)-> int:
+        image.number = self.image_count
+        self.images.append(image)
+        return image
+    
+    @property
+    def image_count(self) -> int:
+        return len(self.images)
+    
+    def add_image_to_queue(self, image:cam_image.Cam_Image):
+        self.image_queue.put(image)
             
-    def add_image(self, image:cam_image.Cam_Image) -> bool:
-        try:
-            image_num = len(self.log['images'])+1
-            
-            image_location = self.directory_path / f"{self.name.replace(' ', '_')}" / f"{self.name.replace(' ', '_')}_{str(image_num).rjust(3, '0')}.png"
-                        
-            
-            if not image.save(image_location, additional_metadata={"session" : self.name}):
-                print("Unable to Save Image")
-                return False
-            
-            image_info = {"number" : image_num,
-                          "time" : image.time_string(PRETTY_FORMAT),
-                          "integration (microseconds)" : image.integration_time,
-                          "integration (seconds)": image.integration_time/1000000,
-                          "auto": image.auto,
-                          "gain (dB)" : image.gain,
-                          "depth (m)" : image.depth,
-                          "device temp (°C)": image.cam_temp,
-                          "sensor_temp (°C)": image.sensor_temp,
-                          "format": image.format,
-                          "inner fraction white": image.inner_fraction_white,
-                          "inner_pixel_averages:":str(image.inner_avgs),
-                          "outer fraction white": image.outer_fraction_white,
-                          "outer_pixel_averages" : str(image.outer_avgs),
-                          "corner fraction white": image.corner_fraction_white,
-                          "corner_pixel_averages" : str(image.corner_avgs),
-                          "unscaled absolute luminance": str(image.unscaled_absolute_luminance),
-                          "relative luminance": str(image.relative_luminance)}
-            
-            self.log["images"].append(image_info)
-            self.write_to_log()
+    def start_processing_queue(self):
+        self.processing_images = True
+        process_thread = threading.Thread(target=self.process_image_queue)
+        process_thread.start()
+    
+    def finish_processing_queue(self):
+        self.image_queue.join()
+        self.processing_images = False
+    
+    def process_image_queue(self, image:cam_image.Cam_Image) -> bool:
+        while self.processing_images:
+            image = self.image_queue.get()                
+            try:
+                image = self.add_image(image)
+            except:
+                self.output("Warning: couldn't add image to session.images", error=True)
+                self.output(traceback.format_exc(e), error=True)
             
             try:
-                session_dict = None
-                with open(self.directory_path / 'session_list.json', 'r') as session_list_file:
-                    session_dict = json.load(session_list_file)
+                self.update_session_list()
+            except:
+                self.output("Warning: couldn't update session_list", error=True)
+                self.output(traceback.format_exc(e), error=True)
+                                            
+            
+            try:        
+                image_location = self.image_directory/ f"{self.name_no_spaces}_{str(image.number).rjust(3, '0')}.png"
                 
-                session_dict[self.name]["images"] = image_num
-                if session_dict is not None:
-                    with open(self.directory_path / 'session_list.json', 'w') as session_list_file:   
-                        json.dump(session_dict, session_list_file, indent=5)
-                
-            except Exception as e:
-                print("Error updating session_list.json - check it exists")
-                traceback.print_exc(e)
-                
-            return True
-    
-        except Exception as e:
-            traceback.print_exc(e)
-    
+                image.save(image_location, additional_metadata={"session" : self.name})
+            except:
+                self.output(f"Warning: couldn't save image {self.image_count-1}", error=True)
+                self.output(traceback.format_exc(e), error=True)
+                                            
+            try:    
+                self.write_to_log()
+            except:
+                self.output("Warning: couldn't write to log", error=True)
+                self.output(traceback.format_exc(e), error=True)
+            try:                                
+                self.write_to_csv(image)
+            except:
+                self.output("Warning: couldn't add image details to csv", error=True)
+                self.output(traceback.format_exc(e), error=True)
+            
+            self.image_queue.task_done()                          
+            
+
     def write_to_log(self) -> bool:
         try:
 
-            return write_json(self.log, self.directory_path)
+            return write_json(self.log, self.parent_directory)
         except Exception as e:
-            traceback.print_exc(e)
+            self.output(traceback.format_exc(e), error=True)
             return False    
-        
-    def output(self, output) -> bool:
+
+    def write_to_csv(self, image:cam_image.Cam_Image) -> bool:
         try:
-            with open(self.directory_path / f"{self.name.replace(' ', '_')}" / "output.txt", "a") as session_output_file:
+            
+            with open(self.csv_file_path, "a") as csv_file:
+                if csv_file.tell() == 0:
+                    csv_file.write(",".join(list(image.info.keys())))
+                csv_file.write(",".join(list(image.info.values())))
+        
+        except:
+            pass
+    
+    def update_session_list(self):
+        session_list = {}
+        if self.session_list_file.exists():
+            try:
+                with open(self.session_list_file, "r") as session_list_file:
+                    session_list = json.load(session_list_file)
+            except:
+                session_list = {}
+        
+        session_list[self.name] = self.details
+        
+        with open(self.session_list_file, "w") as session_list_file:
+            json.dump(session_list, ensure_ascii=False, indent=5)
+    
+    
+    def output(self, output:str|list) -> bool:
+        try:
+
+            with open(self.parent_directory / f"{self.name.replace(' ', '_')}" / "output.txt", "a") as session_output_file:
                 session_output_file.write(output + '\n')
                         
             return True
@@ -149,7 +216,7 @@ class Session:
     
     def run_and_log(self, function):
         try:
-            with open(self.directory_path / f"{self.name.replace(' ', '_')}" / "output.txt", "a") as session_output_file:
+            with open(self.parent_directory / f"{self.name.replace(' ', '_')}" / "output.txt", "a") as session_output_file:
                 with redirect_output(session_output_file):
                     return function()
                         
@@ -161,16 +228,16 @@ class Session:
         print(" Session Info")
         print("             Name:", self.name)
         print("       Start Time:", self.time_string())
-        print(f"    Data location: {self.directory_path}")
+        print(f"    Data location: {self.parent_directory}")
         print("         Latitude:", self.coords[0])
         print("        Longitude:", self.coords[1])
         print(" Number of images:", len(self.log['images']))              
          
              
-def write_json(log:dict, directory:Path) -> bool:
+def write_json(log:dict, filepath:Path) -> bool:
     try:
-        with open(directory / f"{log['session'].replace(' ', '_')}" / "log.json", "w") as session_log_file:
-            json.dump(log, session_log_file, indent=4, ensure_ascii=False)
+        with open(filepath, "w") as session_log_file:
+            json.dump(log, session_log_file, indent=5, ensure_ascii=False)
                         
         return True
     
@@ -265,7 +332,7 @@ def get_start_time():
     return None
 
 def get_directory():
-    print(f"By default session data will be saved at '{str(SESSION_DIR / 'sessions')}'.")
+    print(f"By default session data will be saved at '{str(DATA_DIR / 'sessions')}'.")
     
     new_directory = input("Hit Return to use default, or enter custom directory path: ")
     if new_directory == "":
