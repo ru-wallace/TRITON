@@ -1,6 +1,7 @@
 import numpy as np
 from PIL import Image
-import math
+import sys
+import traceback
 
 
 ISO = "ISO"
@@ -34,7 +35,7 @@ def linearise_colours(image_array : np.ndarray) -> np.ndarray:
     
     lin_array = np.zeros(image_array.shape)
     lin_array[cond1] = np.divide(image_array[cond1], 12.92)
-    lin_array[cond2] = ((image_array[cond2]+0.055)/1.055)**2.4
+    lin_array[cond2] = np.power(np.divide((image_array[cond2]+0.055),1.055),2.4)
     return lin_array
 
 
@@ -84,23 +85,38 @@ def calc_relative_luminance(image : Image.Image | np.ndarray, mask: Image.Image|
         float: 
     """    
     #TODO: convert PIL mode to RGB8 regardless of existing mode
-    image_array = np.array(image)
-    norm_array = normalise_colours(image_array)
+    if isinstance(image, Image.Image):
+        image = np.array(image)
+        
+    
+    norm_array = normalise_colours(image)
 
     lin_array = linearise_colours(norm_array)
     
     if mask is not None:
         mask_cond= np.array(mask) == 255
     else:
-        mask_cond = np.full(image_array.shape[:-1], True)
+        mask_cond = np.full(image.shape[:-1], True)
         
     def get_mean(channel, saturation_threshold):
         masked_channel = channel[np.logical_and(mask_cond, channel <= saturation_threshold)]
         if masked_channel.size == 0:
             return 255.0
         return np.mean(masked_channel)
-    mean_lin = np.array([get_mean(channel, saturation_threshold) for channel in lin_array.transpose(2,0,1)]) #Get mean for each linearised channel
+    
+    try:
+        if len(lin_array.shape) == 2:
+            lin_array = np.expand_dims(lin_array, axis=2)
+    
+    #masked_array = np.ma.array(image_array, mask=mask_bool)
+    
+        mean_lin = lin_array.mean(axis=(0,1)) 
+       # mean_lin = np.array([get_mean(channel, saturation_threshold) for channel in lin_array.transpose(2,0,1)]) #Get mean for each linearised channel
 
+    except Exception as e:
+        print("Error calculating mean linear values:", file=sys.stderr)
+        print(f"Lin_array shape: {lin_array.shape}", file=sys.stderr)
+        traceback.print_exc(e)
     xyz = lin_sRGB_to_XYZ(mean_lin)
     relative_luminance = xyz[1]
 
@@ -109,7 +125,7 @@ def calc_relative_luminance(image : Image.Image | np.ndarray, mask: Image.Image|
 
 
 
-def calc_unscaled_absolute_luminance(image : Image.Image, integration_time : float, aperture : float,  speed : float, speed_format : str = ISO, mask:Image.Image=None, relative_luminance:float=None, saturation_threshold:int=255) -> float:
+def calc_unscaled_absolute_luminance(relative_luminance:float, integration_time : float, aperture : float,  speed : float, speed_format : str = ISO, saturation_threshold:int=255) -> float:
     """Calculate Unscaled Absolute Luminance
         Uses ISO2720:1974 procedure to calculate the unscaled absolute luminance of an image using the aperture, integration, and sensor speed
         Sensore speed may be in Gain or ISO format
@@ -155,9 +171,6 @@ def calc_unscaled_absolute_luminance(image : Image.Image, integration_time : flo
     elif speed_format == ISO:
         speed_iso = speed
         
-    if relative_luminance is None:
-        relative_luminance = calc_relative_luminance(image, mask, saturation_threshold=saturation_threshold)
-    
     # Using ISO2720:1974 - N^2 / t = ( L * S ) / K
     # ==> L / K = N^2 / (S * t)
     
