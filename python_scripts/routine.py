@@ -5,6 +5,7 @@ import traceback
 from pathlib import Path
 import numpy as np
 import threading
+import sys
 
 CAPTURE_START = "capture_start"
 CAPTURE_END="capture_end"
@@ -45,14 +46,14 @@ class Routine:
 
         
         
-        self.name = name
+        self.name:str = name
         
-        self.initial_delay=initial_delay_time_secs
-        self.number_limit = min(int(number_limit), 5000) #max images is 5000
+        self.initial_delay:float=initial_delay_time_secs
+        self.number_limit:int = min(int(number_limit), 5000) #max images is 5000
         
-        self.time_limit_secs = min(time_limit_secs, 345600) #maximum time is 96 hours 
-        self.repeat = int(repeat)
-        self.repeat_interval_time_secs = repeat_interval_time_secs
+        self.time_limit_secs:float = min(time_limit_secs, 345600) #maximum time is 96 hours 
+        self.repeat:int = int(repeat)
+        self.repeat_interval_time_secs:float = repeat_interval_time_secs
         
         settings = Routine._create_settings_matrix(integration_times=integration_time_secs,
                                                        gains=gain,
@@ -67,16 +68,14 @@ class Routine:
             self.repeat = int(self.number_limit / self.iteration_length)
         
         
-
-        
         settings = np.tile(settings, self.repeat)
 
         
-        self.int_times = settings[0,:]
-        self.gains = settings[1,:]
+        self.int_times:np.ndarray = settings[0,:self.number_limit]
+        self.gains:np.ndarray = settings[1,:self.number_limit]
         
 
-        self.repeat = int(repeat)
+        self.repeat:int = int(repeat)
                 
         if interval_mode.lower() not in [CAPTURE_START, CAPTURE_END]:
             print("Interval mode not recognised, setting to default: CAPTURE_START ")
@@ -101,6 +100,7 @@ class Routine:
         self.last_time_printed=0
         self.capturing_image=False
         self.stop_signal = False
+        self.stop_reason = None
 
         
         
@@ -129,34 +129,32 @@ class Routine:
     def start_capture_thread(self, integration_time, gain):
         
         capture_thread = threading.Thread(target=self.capture_image, args=(integration_time, gain))
-        if self.interval_mode == CAPTURE_START:
-            self.set_next_capture_time()
-        
         capture_thread.start()
 
     def capture_image(self, integration_time, gain):
-        attempt_start = time.time()
-        while self.capturing_image == True:
-            time.sleep(self.tick_length)
-            if time.time() - attempt_start > 20:
-                return
-        self.capturing_image = True
-        auto = False
-        int_string = str(integration_time)+'s'
-        if integration_time == 0:
-            auto = True
-            int_string = "Auto"
-        
-        print(f"{round(time.time()-self.start_time, 2)}s ==> Capturing Img #{self.image_count+1} ~ I:{int_string} | G: {gain}dB")
         try:
+            if self.interval_mode == CAPTURE_START:
+                self.set_next_capture_time()
+                
+            self.capturing_image = True
+            auto = False
+            int_string = str(integration_time)+'s'
+            if integration_time == 0:
+                auto = True
+                int_string = "Auto"
+            
+            print(f"{round(time.time()-self.start_time, 2)}s ==> Capturing Img #{self.image_count} ~ I:{int_string} | G: {gain}dB")
+
                     
-            self.capture_function(integration_time, gain, auto)
+            self.capture_function(integration_time_secs=integration_time, gain=gain, auto=auto)
             self.image_count += 1
-        except Exception as e:
-            traceback.print_exc(e)
-        finally:
             if self.interval_mode == CAPTURE_END: 
                 self.set_next_capture_time()
+        except Exception as e:
+            print(f"Error capturing image {self.image_count}")
+            print(traceback.format_exc(e))
+            traceback.print_exc(e)
+        finally:
             self.capturing_image = False
         
     
@@ -170,53 +168,73 @@ class Routine:
             self.next_capture = self.next_capture + self.repeat_interval_time_secs
         
     def tick(self):
-        captured_image = None
-        string = ""
-        
-        def tick_outcome(value:bool=True):
-            return({"complete": value})
-        if self.stop_signal:
-            if not self.capturing_image:
-                self.complete = True
-            return
-        
+        self.now = time.time()
         if self.start_time is None:
-            self.start_time = time.time()
-            print("Starting routine ", self.name)
-            self.next_capture =  self.start_time + self.initial_delay
+                self.start_time = time.time()
+                print("Starting routine ", self.name)
+                self.next_capture =  self.start_time + self.initial_delay
+        try:
             
-        now = time.time()
-        self.run_time = now-self.start_time
-        
+            self.run_time = self.now-self.start_time
+            
+            def tick_done(complete:bool=False, stop_reason:str=None):
+                tick_remaining = self.tick_length-(time.time()-self.now)
+                
+                if (complete or self.stop_signal) and stop_reason is not None and self.stop_reason is None:
+                    self.stop_reason = stop_reason
+                
+                if tick_remaining > 0:
+                    time.sleep(tick_remaining)
+                return complete
+            
+            if self.complete:
+                 tick_done(True, "Complete at start of tick - maybe externally changed")
+                 
+            if self.stop_signal:
+                if not self.capturing_image:
+                    self.complete = True
+                tick_done(self.complete, "Recieved Stop Signal")
 
-        if self.number_limit is not None:
-            self.complete = self.image_count >= self.number_limit and not self.capturing_image
-        
-         
-        if self.time_limit_secs is not None:
-            if not self.complete:
-                self.complete = self.run_time >= self.time_limit_secs and not self.capturing_image
+                
             
-        if not self.complete:
-            self.complete = self.image_count >= len(self.int_times) and not self.capturing_image
-        
-        
-        if self.complete:
-            print("Routine Complete")
-            return tick_outcome(True)  
-        
-        
-          
+
+            if self.number_limit is not None:
+                if self.image_count >= self.number_limit:
+                    if self.capturing_image:
+                        self.stop_signal = True
+                    else:
+                        self.complete = True
+                    tick_done(self.complete, f"Reached Number Limit of {self.number_limit} (Image count: {self.image_count}, Number of integration_times: {self.int_times.size}) (First trap)")
+                    
             
-        if now > self.next_capture and not self.capturing_image and not self.stop_signal:
-            captured_image = self.start_capture_thread(self.int_times[self.image_count], self.gains[self.image_count])
             
-        
-        tick_remaining = self.tick_length-(time.time()-now)
-        if tick_remaining > 0:
-            time.sleep(tick_remaining)
-         
-        return tick_outcome(False)
+            if self.time_limit_secs is not None:
+                if self.run_time >= self.time_limit_secs:
+                    if self.capturing_image:
+                        self.stop_signal = True
+                    else:
+                        self.complete = True
+                    tick_done(self.complete, "Time Limit Reached")
+
+            
+            
+            if self.image_count >= self.int_times.size:
+                if not self.capturing_image:
+                    self.complete = True
+                else:
+                    self.stop_signal = True
+                tick_done(self.complete, f"Reached end of routine ({self.image_count}/{self.int_times.size} images)")
+                
+            if self.now > self.next_capture and not self.capturing_image and not self.stop_signal:
+                self.capturing_image = True
+                self.start_capture_thread(self.int_times[self.image_count], self.gains[self.image_count])
+                
+            tick_done(self.complete, "End of Tick")
+            
+        except Exception as e:
+            traceback.print_exc(e)
+            tick_done(self.complete, "Error")
+        return False
     
 
     
