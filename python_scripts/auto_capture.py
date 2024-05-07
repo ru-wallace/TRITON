@@ -7,7 +7,7 @@ import traceback
 import sys
 from datetime import datetime, timedelta
 from time import time, sleep
-from contextlib import contextmanager
+
 
 import ms5837
 
@@ -35,7 +35,7 @@ def main():
     otherwise it will exit with error code 1.
     
     """    
-    stored_strings = ""
+    stored_strings = []
     
     current_session: session.Session = None
     current_routine: routine.Routine = None
@@ -49,26 +49,44 @@ def main():
             str_args = ""
             for arg in args:
                 str_args+=str(arg)
-            string = datetime.now().strftime("%Y/%m/%d %H:%M:%S: ") + str_args
+            
             nonlocal stored_strings
             print(*args, **kwargs)
             if current_session is not None:
-                if stored_strings != "":
+                if stored_strings:
                     current_session.output(stored_strings)
-                    stored_strings = ""
+                    stored_strings = []
                     
-                current_session.output(string)
+                current_session.output(str_args)
                 
             else:
-                stored_strings += string + "\n"
+                stored_strings.append([str_args, datetime.now()])
             
         except Exception as e: 
-            traceback.print_exc(e)
-    def log_error():
-        with open("error_log.log", "a") as err_file:
-            err_file.write(stored_strings)
-    run_number = 0
-    
+            #print(f"stderr: {sys.stderr}")
+            #print(f"Kwargs: {kwargs} - Args: {args}", file=sys.stderr)
+            print(traceback.format_exc(e), file=sys.stderr)
+            #sys.exit("Error printing")
+
+
+
+    def central_log(*args):
+        with open(DATA_DIR / "sessions" / "central_log.log", "a") as log_file:
+            log_file.write("---------------------------------------------------")
+            string = "".join(args)
+            log_file.write(string)
+
+          
+    def log_error(error:Exception):
+        with open(DATA_DIR / "sessions" / "error_log.log", "a") as err_file:
+            err_file.write("---------------------------------------------------")
+            err_file.write(traceback.format_exc(error))
+
+    def flush_stored_strings():
+       nonlocal stored_strings 
+       for timestamp, string in stored_strings:
+           central_log(f"{timestamp.strftime('%Y-%m-%d %H:%M:%S')}: {string}")
+
     print_and_log("Running run_process.py")
     #Argparse is a library used for parsing arguments passed to the script when it is called from the command line
     parser = argparse.ArgumentParser(description='Get session and routine arguments')
@@ -86,8 +104,9 @@ def main():
             print_and_log("Could not connect to Device")
             sys.exit(1)
     except Exception as e:
+        print(traceback.format_exc(e), file=sys.stderr)
         print_and_log("Could not connect to Device")
-        print_and_log(*traceback.format_exception(e))
+        print_and_log(traceback.format_exception(e))
         sys.exit(1)
     
     try:
@@ -102,91 +121,119 @@ def main():
         print_and_log(*traceback.format_exception(e))
         sys.exit("Could not connect to Pressure Sensor")
     
-    def get_depth() -> float:
+    def get_depth(retry:bool=False) -> float:
         try:
             sensor.read()
             depth : float = sensor.depth()
         except:
-            print_and_log("Pressure Sensor Not Responding - setting depth to 0.0")
-            depth : float = 0.0
+            if retry:
+                sleep(0.1)
+                depth = get_depth()
+            else:
+                print_and_log("Pressure Sensor Not Responding - setting depth to 0.0")
+                depth : float = 0.0
         return depth
     
-    def get_pressure() -> float:
+    def get_pressure(retry:bool=False) -> float:
         try:
             sensor.read()
             pressure : float = sensor.pressure()
         except:
-            print_and_log("Pressure Sensor Not Responding - setting depth to 0.0")
-            pressure : float = 0.0
+            if retry:
+                sleep(0.1)
+                pressure = get_pressure()
+            else:
+                print_and_log("Pressure Sensor Not Responding - setting pressure to 0.0")
+                pressure : float = 0.0
         return pressure
       
       
-    def get_temp() -> float:
+    def get_temp(retry:bool=False) -> float:
         try:
             sensor.read()
             temp : float = sensor.temperature()
         except:
-            print_and_log("Pressure Sensor Not Responding - setting temp to 0.0")
-            temp : float = 0.0
+            if retry:
+                sleep(0.1)
+                temp = get_temp()
+            else:
+                print_and_log("Pressure Sensor Not Responding - setting temp to 0.0")
+                temp : float = 0.0
         return temp
     
-    def save_image_data(image:Cam_Image, filename):
-
-        group = str(image.integration_time)
-        if image.auto:
-            group = "auto"
-            
-        image_data = [group, image.time_string(format="%Y-%m-%d %H:%M:%S"), image.integration_time, image.integration_time/1000000, image.cam_temp, get_temp(), get_pressure(), image.depth, image.inner_fraction_white, image.outer_fraction_white, image.corner_fraction_white,
-                           *image.inner_avgs, *image.outer_avgs, *image.corner_avgs, image.relative_luminance, image.unscaled_absolute_luminance]
-        
-        new_file = False
-        
-        with open(filename, "r") as file:
-            new_file = len(file.read()) == 0
-        
-        with open(filename, "a") as file:
-            if new_file:
-                file.write(f"group, timestamp, integration_time, integration_time_secs, camera_temperature_C, sensor_temp_C, pressure_mbar, depth_M, inner_saturated_pixels, outer_saturated_pixels, corner_saturated_pixels, {','.join([f'inner_pixel_average_{index}' for index, _ in enumerate(image.inner_avgs)])}, {','.join([f'outer_pixel_average_{index}' for index, _ in enumerate(image.outer_avgs)])}, {','.join([f'corner_pixel_average_{index}' for index, _ in enumerate(image.corner_avgs)])}, relative_luminance, absolute_luminance\n")
-                
-            
-            file.write(','.join(str(item) for item in image_data))
-            file.write('\n')
 
     def capture_image(integration_time_secs:float=None, gain:float=None, auto:bool=False):
-        
-        nonlocal current_session
-        nonlocal current_routine
-        nonlocal csv_filepath
-        
-        
-        print_and_log(f"Capturing Image #{current_routine.image_count} - Integration Time : {integration_time_secs}s")
-        
+        try:
+            
+            nonlocal current_session
+            nonlocal current_routine
+            
+            exposure_time = device.exposure_time()/1e6
+            image_string = f"Capturing Image #{current_session.image_count + len(current_session.image_queue)}(Routine image#{current_routine.image_count}) - Integration Time : {integration_time_secs}s"
+            if auto:
+                image_string += "- Auto Exposure"
+            print_and_log(image_string)
+            
 
-        if gain is not None:
-            device.gain(gain) #Change device gain if it is passed 
-        
-        device.node("AcquisitionMode").SetCurrentEntry("SingleFrame")
+            if gain is not None:
+                device.gain(gain) #Change device gain if it is passed 
             
-        #Switch to auto-adjust integration time mode if integration time is 0 or None
-        #Otherwise, set the integration time to the passed value.
-        if integration_time_secs == 0 or integration_time_secs is None:
-            auto = True
-        else:
-            device.exposure_time(seconds=integration_time_secs)
-            
-        try:    
-            image: Cam_Image = current_session.run_and_log(lambda: device.capture_image(auto=auto))
-            
-            image.set_depth(get_depth())
-            current_session.add_image(image)
-            save_image_data(image, csv_filepath)
+
+            #Switch to auto-adjust integration time mode if integration time is 0 or None
+            #Otherwise, set the integration time to the passed value.
+            if integration_time_secs == 0 or integration_time_secs is None or auto:
+                auto = True
+            else:
+                exposure_time = device.exposure_time(seconds=integration_time_secs)/1e6
+                print_and_log(f"Set Exposure Time to {exposure_time}s")
+              
+            capture_successful = False
+            image = None
+            attempt_no = 0
+            desired_exposure_time = integration_time_secs*1e6 if not auto else None
+            while not capture_successful:
+                print_and_log("Capturing...")
+                
+                image: Cam_Image = device.capture_frame(return_type=ids_interface.Resources.CAM_IMAGE, desired_exposure_time_microseconds=desired_exposure_time)
+                if image.image is None:
+                    continue
+                print_and_log("Capture Complete")
+                image.set_depth(get_depth(retry=True))
+                image.set_pressure(get_pressure(retry=True))
+                image.set_environment_temperature(get_temp(retry=True))
+                image.set_auto(auto)
+                current_session.add_image_to_queue(image)
+                if auto:
+                    print_and_log("Auto")
+                    attempt_no += 1
+                    
+                    capture_successful = image.correct_saturation
+                    print_and_log("capture_successful: ", image.correct_saturation)
+                    if not capture_successful:
+                        new_exposure_time = ids_interface.calculate_new_exposure(current_exposure_time=image.integration_time/1e6, saturation_fraction=image.inner_saturation_fraction)
+                        
+                        print_and_log(f"Attempt {attempt_no}: Incorrect Saturation - at {image.integration_time/1e6}s - trying at {new_exposure_time}s")
+                        device.exposure_time(seconds=new_exposure_time)
+                        exposure_time = new_exposure_time
+                        desired_exposure_time = exposure_time*1e6
+                    else:
+                        print_and_log(f"Attempt {attempt_no}: Correct saturation at {exposure_time}s")
+                        capture_successful = True
+                else:
+                    capture_successful = True
             
             print_and_log(f"Captured Image #{current_routine.image_count}")
+            print_and_log(f"Timestamp: {image.time_string('%Y-%m-%d %H:%M:%S')}")
+            print_and_log(f"Integration Time: {image.integration_time/1e6}s ")
+            
         except Exception as e:
-            print_and_log("Error Capturing Image")
-            print_and_log(traceback.format_exc(e))
+            print_and_log(f"Error Capturing Image {current_routine.image_count}")
+            try:
+                print_and_log(traceback.format_exc(e))
+            except:
+                pass
         
-   
+
     
 
     # Parse command line arguments
@@ -251,60 +298,44 @@ def main():
     current_session: session.Session = None  
     new_session = False
     session_dict:dict = None
-    
     try:
-        with open(session_list_file, mode="r") as session_list:
-            #Open the session list and parse the json data into a dict object 
-            session_dict = json.load(session_list)
-            
-            #Check if a session of the specified name is in the session list
-            if session_name in session_dict:
-                #If it is get the session directory path and load the session from the file.
-                session_path = Path(session_dict[session_name]['directory_path']) / session_name.replace(" ", "_")
-                if session_path is not None and session_path.exists():
-                    print_and_log("Session Exists")
-                    current_session = session.from_file(session_path)
-                    current_session.print_info()
-            else:
-                #If the session is not in the list, make a new session with that name. Session info such as coordinates/location
-                # will have to be added later in the console interface
-                print_and_log(f"Session {session_name} not found")
-                print_and_log("Creating new session...")
-                new_session = True
+        try:
+            with open(session_list_file, mode="r") as session_list:
+                #Open the session list and parse the json data into a dict object 
+                session_dict = json.load(session_list)
                 
-    except:
-        print_and_log("Could not open Session List")
-        new_session = True
-        session_dict = {}
-        
-    #If a new session was created, add it to the session list file.
-    if new_session:
-        current_session = session.Session(name=session_name, directory=DATA_DIR / "sessions")
-        with open(session_list_file, mode="w") as session_list:
-            session_dict.update({current_session.name: 
-                                    {"start_time":current_session.time_string(),
-                                        "coords" : current_session.coords,
-                                        "directory_path": str(current_session.directory_path),
-                                        "images" : 0
-                                        }
-                                    })
-            json.dump(session_dict, session_list, indent=4)
-        
-        print_and_log(f"New Session Created in {current_session.directory_path}")
-    
-
-    Path("./image_data").mkdir(parents=True, exist_ok=True)
-    
-    run_number = 0
+                #Check if a session of the specified name is in the session list
+                if session_name in session_dict:
+                    #If it is get the session directory path and load the session from the file.
+                    session_path = Path(session_dict[session_name]['directory_path']) / session_name.replace(" ", "_")
+                    if session_path is not None and session_path.exists():
+                        print_and_log("Session Exists")
+                        current_session = session.from_file(session_path)
+                        current_session.print_info()
+                else:
+                    #If the session is not in the list, make a new session with that name. Session info such as coordinates/location
+                    # will have to be added later in the console interface
+                    print_and_log(f"Session {session_name} not found")
+                    print_and_log("Creating new session...")
+                    new_session = True
+                    
+        except:
+            print_and_log("Could not open Session List")
+            new_session = True
+            session_dict = {}
     
     
-    while os.path.exists(current_session.session_directory() / f"run_{run_number}.csv"):
-        run_number += 1
     
-    csv_filepath = current_session.session_directory() / f"run_{run_number}.csv"
-    
-    open(csv_filepath, "w").close()
-    
+        #If a new session was created, add it to the session list file.
+        if new_session:
+            current_session = session.Session(name=session_name, directory=DATA_DIR / "sessions")
+            
+            print_and_log(f"New Session Created in {current_session.parent_directory}")
+            
+    except Exception as e:
+        print_and_log(traceback.format_exc(e))
+        flush_stored_strings()
+        sys.exit("Exited - Could not open session")
   
             
     print_and_log(f"Running routine {current_routine.name}...")
@@ -329,17 +360,25 @@ def main():
     if not os.path.exists(PIPE_OUT_FILE):
         os.mkfifo(PIPE_OUT_FILE)
     
-
+    device.gain(1)
+    device.change_sensor_mode("Default")
+    device.exposure_time(seconds=current_routine.int_times[0])
+    
+    device.node("AcquisitionMode").SetCurrentEntry("Continuous")
+    device.start_acquisition()
     
     device.node("ExposureAuto").SetCurrentEntry("Off")
+    device.node("GainAuto").SetCurrentEntry("Off")
     
+    sleep(0.5)
     complete = False
 
-    check_time_long = time()
-    check_time_short = time()
+
     
     consecutive_error_count = 0
     in_pipe_fd = os.open(PIPE_IN_FILE, os.O_RDONLY | os.O_NONBLOCK)
+    
+    
     
     def write_to_pipe(message:str):
         try:
@@ -355,7 +394,8 @@ def main():
             print_and_log("Error passing message to named pipe")
             print_and_log(traceback.format_exc(e))
         
-    
+    check_time_long = time()
+    check_time_short = time()
     
     with os.fdopen(in_pipe_fd) as in_pipe:
         while not complete:
@@ -370,6 +410,8 @@ def main():
                         print_and_log("Received STOP Message")
                         if current_routine.capturing_image:
                             print_and_log("Waiting for image capture to finish...")
+                        elif current_session.busy:
+                            print_and_log("Waiting for image saving to finish...")
                         else: 
                             print_and_log("Stopping")
                         for i in range(10):
@@ -389,13 +431,23 @@ def main():
     
                 if time() - check_time_short > 1:
                     check_time_short = time()
-                    message = f"Routine: {current_routine.name}\nSession: {current_session.name}\nRuntime: {str(timedelta(seconds=int(current_routine.run_time)))}\nImages Captured: {current_routine.image_count}"
-                    if current_routine.stop_signal:
-                        message  += "STOPPING\n"
-                    write_to_pipe(message)
+                    try:
+                        message = f"Routine: {current_routine.name}\nSession: {current_session.name}\nRuntime: {str(timedelta(seconds=int(current_routine.run_time)))}\nImages Captured: {current_routine.image_count}\nImage Save Queue Size: {len(current_session.image_queue)}"
+                        if current_routine.stop_signal:
+                            message  += "\nSTOPPING\n"
+                        write_to_pipe(message)
+                    except Exception as e:
+                        pass
 
-                tick_result = current_routine.tick()
-                complete = current_routine.complete
+                #current_session.run_and_log(current_routine.tick)
+                current_routine.tick()
+                
+                
+                
+
+                current_session.process_image_queue_async()
+                
+                complete = current_routine.complete and len(current_session.image_queue) == 0 and not current_session.busy 
                 consecutive_error_count = 0
                 
                 
@@ -409,9 +461,13 @@ def main():
                 print_and_log("Error count: ", consecutive_error_count)
                 if consecutive_error_count > 5:
                     print_and_log("Too many consecutive tick errors. Exiting")
-                    sys.exit("Too many consecutive tick errors.")
                     
-    
+                    sys.exit("Too many consecutive tick errors.")
+    print_and_log(f"Completion Reason: {current_routine.stop_reason}")
+    device.stop_acquisition()
+    while current_session.busy:
+        sleep(0.5)
+    current_session.process_image_queue()
     print_and_log(f"Complete at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
     
 #Wrapper code for running this script.
