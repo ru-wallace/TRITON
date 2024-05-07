@@ -21,7 +21,7 @@ with suppress_stdout():
     from ids_peak import ids_peak_ipl_extension
     #from ids_peak_afl import ids_peak_afl_extension
     import traceback #Module for finding Exception causes more easily
-    from datetime import datetime
+    from datetime import datetime, timedelta
     import numpy as np
     import ctypes
 
@@ -101,6 +101,7 @@ class Connection:
                 self.connected = self.open_connection()
             except Exception as e:
                 self.connected = False
+                traceback.print_exc(e)
         except Exception as e:
             traceback.print_exc(e)            
             
@@ -152,7 +153,7 @@ class Connection:
             self.printq("Opened datastream")
             
             # Get nodemap of the remote device for all accesses to the genicam nodemap tree
-            self.nodemap = self.device.RemoteDevice().NodeMaps()[0]
+            self.nodemap: ids_peak.NodeMap = self.device.RemoteDevice().NodeMaps()[0]
             
             self.printq("Successfully Connected to Device")
             self.info = {"User ID" : str(self.node("DeviceUserID").Value()),
@@ -172,6 +173,15 @@ class Connection:
  
             self.pixel_format = ids_peak_ipl.PixelFormat(self.node("PixelFormat").CurrentEntry().Value())
             
+            self.node("TimestampReset").Execute()
+            self.node("TimestampReset").WaitUntilDone()
+            self.start_time = datetime.now()
+            
+            
+            self.tick_length = 1/self.node("DeviceClockFrequency").Value()
+            
+            
+           
             
             for key, value in self.info.items():
                 self.printq(f"{key}: {value}")
@@ -180,9 +190,22 @@ class Connection:
         except Exception as e:
             traceback.print_exc(e)
             return False
+     
+    def activate_chunks(self):
+        chunks = ["Timestamp", "ExposureTime", "Width", "Height", "PixelFormat", "Gain"]
+            
+        self.node("ChunkModeActive").SetValue(False)
+            
+        for chunk in chunks:
+            try:
+                self.node("ChunkSelector").SetCurrentEntry(chunk)
+                self.node("ChunkEnable").SetValue(True)
+            except Exception as e:
+                traceback.print_exc(e)
         
-        
-    def node(self, name:str) -> ids_peak.Node:
+        self.node("ChunkModeActive").SetValue(True)   
+    
+    def node(self, name:str) -> ids_peak.Node|ids_peak.CommandNode|ids_peak.CategoryNode|ids_peak.IntegerNode|ids_peak.FloatNode|ids_peak.EnumerationNode|ids_peak.EnumerationEntryNode|ids_peak.RegisterNode:
         """A shortcut for "self.nodemap.FindNode([node])".
         Retrieves a device node to query, set, or give a command
 
@@ -260,90 +283,88 @@ class Connection:
         if auto:
             image = self.capture_auto_exposure()
         else:
-            image = self.single_frame_acquisition()['image']
+            image = self.capture_frame(return_type=Resources.IPL_IMAGE)
         
         image = self.create_cam_image(image, auto=auto)
         
         return image
-        
-    def capture_auto_exposure(self, init_microseconds=None):
+    
 
+        
+    def capture_auto_exposure(self, initial_microseconds=None) -> ids_peak_ipl.Image:
+        previous_acquisition_mode = self.node("AcquisitionMode").CurrentEntry().SymbolicValue() 
+        
+        if previous_acquisition_mode != "Continuous":
+                self.stop_acquisition()
+                self.node("AcquisitionMode").SetCurrentEntry("Continuous")
+        
+        self.start_acquisition()
                 
-                if init_microseconds is not None:
-                    self.exposure_time(microseconds=init_microseconds)
-                    
-                self.printq("Auto Adjusting Integration Time")
-                image_correctly_exposed = False # Assume image will be incorrectly exposed
-                image = None
-                while not image_correctly_exposed:
-                    
-                    image = self.single_frame_acquisition() #Capture image from device with current integration time setting
-                    target_fraction = 0.01 #The target fraction of pixels to be oversaturated. 
-                    target_margin = 0.005 #Images with fraction of pixel saturated above or below this margin are incorrectly exposed
-                    
-                    
-                    circle_mask = cam_image.create_centre_mask(image, centre=[1226, 1034], radius=472)
-                    fraction_white = cam_image.get_fraction_white_pixels(image, mask=circle_mask, saturation_threshold=250)
-                    overexposed_difference = target_fraction - fraction_white #Calculate how far the image is from correct saturation level
-                    exposure_time = self.exposure_time()
-                    
-                    
-                    if abs(overexposed_difference) > target_margin: #If the image saturation is outside the margin of error perform adjustment
-                        
-                        self.printq(f"Incorrectly Exposed at {exposure_time/1000000}s")
-                        self.printq(f"Fraction of pixels overexposed: {fraction_white}")
-                        self.printq(f"Target Fraction: {target_fraction}")
-
-                        #Calculate adjustment factor. The current integration time will be multiplied by this to get the new integration time guess.
-                        #The factor is limited to between 2 and 0.5 (as sometimes small values can lead to crazy numbers)
-                        
-                        #The adjustment scales with the ralationship between the size of the saturation error and the target saturation fraction
-                        #If the difference is large, the adjustment is large, and vice versa. This is fairly quick but could probably be optimised (Maybe with a PID type control?)
-                        adjustment_factor = min(10, max(0.1, 1 - (fraction_white-target_fraction)/target_fraction ))
-                        
-                        self.printq("Adjustment factor: ", adjustment_factor)
-                        #Calculate the new guess for a good integration time
-                        new_integration  = exposure_time*adjustment_factor
-                        
-                        self.printq(f"Changing integration time to { self.exposure_time(microseconds=new_integration)/1000000}s")
-                    else:
-                        #If within the margin, exit the loop with the correctly exposed image
-                        image_correctly_exposed = True
-                        self.printq("############### Successful Adjustment ###############")
-                        self.printq(f"Correctly Exposed at {exposure_time/1000000}s")
-                        self.printq(f"Fraction of pixels overexposed: {fraction_white}")
-                        self.printq(f"Target Fraction: {target_fraction}")
-                return image
-                    
-    
-    def create_cam_image(self, image:np.ndarray, auto:bool=False)-> cam_image.Cam_Image:
+        if initial_microseconds is not None:
+            self.exposure_time(microseconds=initial_microseconds)
+            
+        self.printq("Auto Adjusting Integration Time")
+        image_correctly_exposed = False # Assume image will be incorrectly exposed
+        image = None
+        while not image_correctly_exposed:
+            
+            
+            image:ids_peak_ipl.Image = self.capture_frame(return_type=Resources.IPL_IMAGE) #Capture image from device with current integration time setting
+            target_fraction = 0.01 #The target fraction of pixels to be oversaturated. 
+            target_margin = 0.005 #Images with fraction of pixel saturated above or below this margin are incorrectly exposed
+            
+            exposure_time = self.exposure_time()
+            
+            saturation_fraction = calculate_saturation_fraction()
+            
+            if abs(target_fraction - saturation_fraction) > target_margin: #If the image saturation is outside the margin of error perform adjustment
+                new_integration = calculate_new_exposure(exposure_time, saturation_fraction=saturation_fraction, target_fraction=0.01, target_margin=0.005)
+                
+                self.printq(f"Changing integration time to { self.exposure_time(microseconds=new_integration)/1000000}s")
+            else:
+                #If within the margin, exit the loop with the correctly exposed image
+                image_correctly_exposed = True
+                self.printq("############### Successful Adjustment ###############")
+                self.printq(f"Correctly Exposed at {exposure_time/1000000}s")
+                self.printq(f"Fraction of pixels overexposed: {saturation_fraction}")
+                self.printq(f"Target Fraction: {target_fraction}")
         
-        image_depth = get_depth()
-
-        image_exposure = self.exposure_time()
-        image_gain = self.gain()
-        
-        image_temp = self.get_temperature()
-        
-
-        image_timestamp = datetime.now()
-        
-
-        format=self.node("PixelFormat").CurrentEntry().SymbolicValue()
-    
-        image = cam_image.Cam_Image(image=image,
-                                timestamp = image_timestamp,
-                                integration_time=image_exposure,
-                                auto=auto,
-                                gain=image_gain,
-                                depth=image_depth,
-                                cam_temp = image_temp,
-                                sensor_temp=0,
-                                format=format)
-    
+        if previous_acquisition_mode != "Continuous":
+            self.stop_acquisition()
+            self.node("AcquisitionMode").SetCurrentEntry("Continuous")
         return image
+                    
     
-    def single_frame_acquisition(self) -> np.ndarray|bool:
+    def create_cam_image(self, image: ids_peak_ipl.Image, auto:bool=False, exposure_time:float=None, gain:float=None, temperature:float=None)-> cam_image.Cam_Image:
+        
+
+        image_exposure = exposure_time if exposure_time is not None else self.exposure_time()
+        image_gain = gain if gain is not None else self.gain()
+        image_temp = temperature if temperature is not None else self.get_temperature()
+        image_timestamp_ns = image.Timestamp()
+        image_timestamp = self.timestamp_to_datetime(image_timestamp_ns)
+        image_format = image.PixelFormat().Name()
+
+        #format=self.node("PixelFormat").CurrentEntry().SymbolicValue()
+        
+        
+        image_array = image.get_numpy_2D()
+        try:
+            cam_img = cam_image.Cam_Image(image=image_array,
+                                    timestamp = image_timestamp,
+                                    integration_time=image_exposure,
+                                    auto=auto,
+                                    gain=image_gain,
+                                    cam_temp = image_temp,
+                                    aperture=1,
+                                    format=image_format)
+        except:
+            return None
+        
+        return cam_img
+    
+
+    def single_frame_acquisition(self, return_type=Resources.NDARRAY) -> np.ndarray|ids_peak_ipl.Image|ids_peak.Buffer:
         """Captures and returns an image using single frame acquisiton (SFA) mode.
         
         SFA is slower than Continous or other modes but saves power by not being active in between captures
@@ -363,7 +384,7 @@ class Connection:
             
             self.start_acquisition()
 
-            image = self.capture_frame()
+            image = self.capture_frame(return_type=return_type)
             
             
             self.stop_acquisition() #Just in case, as in SFA mode acquisition should stop automatically after capture
@@ -388,7 +409,7 @@ class Connection:
         """        
         try:
             self.printq("Starting Acquisition...")
-            
+            #print("Starting Acquisition...", file=sys.stderr)
             # Check that a device is opened and that the acquisition is NOT running. If not, return.
             if self.device is None:
                 self.printq("No Device Connected")
@@ -397,6 +418,8 @@ class Connection:
                 self.printq("Acquisition already running")
                 return True
             
+            self.activate_chunks()
+            self.datastream_nodemap.FindNode("StreamBufferHandlingMode").SetCurrentEntry("OldestFirst")
             self.alloc_and_announce_buffers()
 
             # Lock critical features to prevent them from changing during acquisition
@@ -435,7 +458,8 @@ class Connection:
         """        
         try:
             self.printq("Stopping Acquisition...")
-              # Check that a device is opened and that the acquisition is running. If not, return.
+            #print("Stopping Acquisition...", file=sys.stderr)
+            # Check that a device is opened and that the acquisition is running. If not, return.
             if self.device is None or self.acquisition_running is False:
                 self.printq("Device is None or acquisition is already stopped")
                 return True
@@ -464,10 +488,10 @@ class Connection:
             traceback.print_exc(e)
             return False
     
-
+    
     
         
-    def capture_frame(self, return_type=Resources.NDARRAY) -> np.ndarray|ids_peak_ipl.Image|cam_image.Cam_Image:
+    def capture_frame(self, return_type=Resources.NDARRAY, desired_exposure_time_microseconds:float=None) -> np.ndarray|ids_peak_ipl.Image|cam_image.Cam_Image:
         """Capture an image on the device. 
         Acquisition must be started.
         Flushes annd re-Queues buffers before capturing as they may be filled with images from when acquisition started.
@@ -478,26 +502,37 @@ class Connection:
         try:
             
             self.printq("Capturing Image...")
-
-
-            buff_time=max(2000, int(self.exposure_time()/1000)+500)
-
-            if self.node("AcquisitionMode").CurrentEntry().SymbolicValue() in ["MultiFrame", "Continuous"] and False:
-                self.printq("Flushing buffers")
-                # Get buffer from device's datastream      
-                #Flush previous buffers that may have taken images a while ago
-                for buffer in self.datastream.AnnouncedBuffers():
-                    #buffer = self.datastream.WaitForFinishedBuffer(buff_time)
-                    if not buffer.IsQueued() and not buffer.IsAcquiring():
-                        self.datastream.QueueBuffer(buffer)
-
+            exposure=self.exposure_time()
+            if desired_exposure_time_microseconds is not None:
+                buff_time=max(2000, int(desired_exposure_time_microseconds/1000)+500)
+            else:
+                buff_time=max(2000, int(exposure/1000)+500)
             
-            buffer = None
+            buffer : ids_peak.Buffer = None
             attempts = 0
+            
+
+            iterations = 0
             while buffer is None:
                 try:
 
                     buffer = self.datastream.WaitForFinishedBuffer(buff_time)
+                    if buffer.HasChunks():
+                        self.nodemap.UpdateChunkNodes(buffer)
+                        exposure = self.node("ChunkExposureTime").Value()
+                        if desired_exposure_time_microseconds is not None:
+                            #print(f"Desired time: {desired_exposure_time_microseconds}", file=sys.stderr)
+                            #print(f"Chunk time: {exposure}", file=sys.stderr)
+                            if abs(exposure - desired_exposure_time_microseconds) > desired_exposure_time_microseconds/10:
+                                self.datastream.QueueBuffer(buffer)
+                                buffer = None
+                        else:
+                            if iterations > 2:
+                                break
+                            self.datastream.QueueBuffer(buffer)
+                            buffer=None
+                            iterations += 1
+                            
                 except Exception as e:
                     buff_time += 100
                     attempts +=1
@@ -505,44 +540,52 @@ class Connection:
                         traceback.print_exc(e)
                         break
             
+
+            
+           
             # Create IDS peak IPL image and convert it to RGBa8 format
-            ipl_image = ids_peak_ipl_extension.BufferToImage(buffer)
+            ipl_image : ids_peak_ipl.Image = ids_peak_ipl_extension.BufferToImage(buffer)
             
-            
-            
+
             # Queue buffer so that it can be used again
             self.datastream.QueueBuffer(buffer)
+            
+            
+            format = ipl_image.PixelFormat().Name()
+            self.printq("Format: ", format)
             
             if return_type == Resources.IPL_IMAGE:
                 return ipl_image
             
             
             # Get raw image data from converted image and construct a QImage from it
-            image_np_array = ipl_image.get_numpy_1D()
+            
 
+            if return_type == Resources.CAM_IMAGE:
+                return self.create_cam_image(ipl_image, exposure_time=exposure)
             
             #converted_ipl_image = self.image_converter.Convert(
             #    ipl_image, self.pixel_format)
 
 
-            width = ipl_image.Width()
-            height = ipl_image.Height()
+            #width = ipl_image.Width()
+            #height = ipl_image.Height()
+            
+            image_np_array = ipl_image.get_numpy_2D()
 
-            format = ipl_image.PixelFormat().Name()
-            self.printq("Format: ", format)
+            
                 
-            img = image_np_array.reshape(height,width)
+            #img = image_np_array.reshape(height,width)
 
             if return_type == Resources.NDARRAY:
-                return img.copy()
+                return image_np_array.copy()
             
-            if return_type == Resources.CAM_IMAGE:
-                return self.create_cam_image(img.copy())
+            
             
 
 
         except Exception as e:
-            traceback.print_exc(e)
+            traceback.print_exc(e, file=sys.stderr)
             return False
     
    
@@ -556,13 +599,14 @@ class Connection:
             microseconds (int, optional): New exposure length in microseconds. Defaults to None.
             seconds (float, optional): New exposure length in seconds. Defaults to None.
         Returns:
-            int: _description_
+            int: new exposure time in microseconds
         """    
         try:
+            current_gain = self.gain()
             current_pixel_format = self.node("PixelFormat").CurrentEntry().SymbolicValue()
             if seconds is not None:
                 if microseconds is None:
-                    microseconds=int(seconds*1000000) #Convert seconds to microseconds
+                    microseconds=int(seconds*1e6) #Convert seconds to microseconds
                 else: 
                     self.printq("Can't Set both microseconds and seconds parameter. Using microseconds parameter value")
                     
@@ -570,28 +614,47 @@ class Connection:
                 sensor_mode = self.node("SensorOperationMode").CurrentEntry().SymbolicValue()
                 max_exp = self.node("ExposureTime").Maximum()
                 min_exp = self.node("ExposureTime").Minimum()
+                previous_acquisition_state=self.acquisition_running
                 
                 if sensor_mode == "Default" and microseconds > max_exp:
+                    if previous_acquisition_state:
+                        self.stop_acquisition()
                     self.change_sensor_mode("LongExposure")
                     self.printq("Changing to Long Exposure Mode")
                     max_exp = self.node("ExposureTime").Maximum()
-                    min_exp = self.node("ExposureTime").Minimum()                    
+                    min_exp = self.node("ExposureTime").Minimum()
+                    self.node("PixelFormat").SetCurrentEntry(current_pixel_format)
+                    self.gain(current_gain)
+                                       
                 
                 if sensor_mode == "LongExposure" and microseconds < min_exp:
+                    if previous_acquisition_state:
+                        self.stop_acquisition()
+                        
                     self.change_sensor_mode("Default")
                     self.printq("Changing to Default Mode")
                     max_exp = self.node("ExposureTime").Maximum()
                     min_exp = self.node("ExposureTime").Minimum()
+                    self.node("PixelFormat").SetCurrentEntry(current_pixel_format)
+                    self.gain(current_gain)
+                    
+                
+                
                      
                 new_time = max(min_exp, min(max_exp, microseconds))
                 self.node("ExposureTime").SetValue(new_time)
                 
-                self.node("PixelFormat").SetCurrentEntry(current_pixel_format)
+                
+                
+                if not self.acquisition_running and previous_acquisition_state:
+                    #Restart acquisition if it was running before
+                    self.start_acquisition()
             
             current_time=int(self.node("ExposureTime").Value())
             self.printq("Exposure Time: ", current_time)
             return current_time
         except Exception as e:
+            print(f"Error changing exposure time to {microseconds} microseconds", file=sys.stderr)
             traceback.print_exc(e)
     
     def gain(self, gain:float=None) -> float:
@@ -627,7 +690,13 @@ class Connection:
         except Exception as e:
             traceback.print_exception(e)
 
-    
+    def timestamp_to_datetime(self, timestamp_ns) -> datetime:
+        seconds = timestamp_ns/1e9
+        new_datetime = self.start_time + timedelta(seconds=seconds)
+        return new_datetime
+        
+        
+        
             
     def change_sensor_mode(self, mode:str="Default"):
         """Switch to different User settings profile
@@ -635,6 +704,7 @@ class Connection:
         Args:
             mode (str, optional): user set to switch to. Defaults to "Default".
         """        
+        #print("Changing to sensor mode ", mode, file=sys.stderr)
         self.node("UserSetSelector").SetCurrentEntry(mode)
         self.node("UserSetLoad").Execute()
         self.node("UserSetLoad").WaitUntilDone()
@@ -731,14 +801,42 @@ class Connection:
             traceback.print_exc(e)
             return False
     
-    def sharpness_test(self) -> float:
-        return self.single_frame_acquisition()['sharpness']
-    
+
     def printq(self, *args, **kwargs):
         """Only prints if Connection instance quiet mode is set to False
         """        
         if not self.quiet_mode:
             print(*args, **kwargs)
+
+### Static Functions
+
+def calculate_saturation_fraction(image:ids_peak_ipl.Image):
+    image_array = image.get_numpy_2D()
+    
+    circle_mask = cam_image.create_circle_mask(image_array, centre=[1226, 1034], radius=472)
+    fraction_white = cam_image.get_fraction_white_pixels(image_array, mask=circle_mask, saturation_threshold=250)
+    
+    return fraction_white
+
+def calculate_new_exposure(current_exposure_time, saturation_fraction:float, target_fraction:float=0.01):
+    new_exposure_time = current_exposure_time
+    overexposed_difference = saturation_fraction - target_fraction #Calculate how far the image is from correct saturation level
+    
+
+    #Calculate adjustment factor. The current integration time will be multiplied by this to get the new integration time guess.
+    #The factor is limited to between 20 and 0.01 (as sometimes small values can lead to crazy numbers)
+    
+    #The adjustment scales with the ralationship between the size of the saturation error and the target saturation fraction
+    #If the difference is large, the adjustment is large, and vice versa. This is fairly quick but could probably be optimised (Maybe with a PID type control?)
+    
+    proportional_adjustment = overexposed_difference/0.001
+    adjustment_factor = min(10, max(0.1, 1 - (overexposed_difference)/target_fraction ))
+    
+
+    #Calculate the new guess for a good integration time
+    new_exposure_time  = current_exposure_time*adjustment_factor
+        
+    return new_exposure_time
 
 def make_ROI_start_centre(image:ids_peak_ipl.Image, centre:tuple[int]=None, size:int|tuple[int]=None) -> ids_peak_ipl.Rect2D:
 
