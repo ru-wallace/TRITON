@@ -76,10 +76,17 @@ def main():
             #sys.exit("Error printing")
 
     def log_error(error:Exception):
+        print("Error", file=sys.stderr)
+        nonlocal stored_strings
+        nonlocal current_session
         try:
             traceback.print_exc(error, file=sys.stderr)
             string = "".join(traceback.format_exception(error))
             print_and_log(string)
+            if current_session is None:
+                with open(DATA_DIR / "sessions" / "error_log.log", "a") as log_file:
+                    log_file.write("---------------------------------------------------")
+                    log_file.write(string)
         except Exception as e:
             traceback.print_exc(e, file=sys.stderr)
         
