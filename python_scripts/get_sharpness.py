@@ -49,16 +49,15 @@ class Sharpness_Tool:
                 print("Exiting...")
                 break
             except Exception as e:
-                traceback.print_exc(e)
+                traceback.print_exception(e)
                 self.error = True
                 self.last_error = e
             finally:
-                print("error count: ", self.error_count)
                 self.error_count += self.error
                 if self.error_count > 4:
                     print("")
                     print("Too many errors. Quitting.")
-                    traceback.print_exc(self.last_error)
+                    traceback.print_exception(self.last_error)
                     break
                 pass
             
@@ -76,21 +75,20 @@ class Sharpness_Tool:
             #print(f"Capturing - Exposure time: {self.device.exposure_time()/1e6}s")
             sys.stdout.flush()
             image = self.device.capture_frame(return_type=ids_interface.Resources.IPL_IMAGE)
-            sharpness_thread = threading.Thread(self.print_sharpness, args=(image,))
+            sharpness_thread = threading.Thread(target=self.print_sharpness, args=(image,))
             sys.stdout.flush()
             sharpness_thread.start()
         except KeyboardInterrupt:
             self.error = True
             self.error_count = 10
         except Exception as e:
-            traceback.print_exc(e)
+            traceback.print_exception(e)
             self.error = True
             self.last_error = e
 
             
     def print_sharpness(self, image):
         try:
-            print("Hello", flush=True)
             if not self.ROI:
                 self.ROI = ids_interface.make_ROI_start_centre(image, size=600)
                     
