@@ -65,7 +65,7 @@ class Session:
             self.image_directory.mkdir(parents=True, exist_ok=True)
                       
            
-            self.images:list[cam_image.Cam_Image]=[]
+            self.images:list[dict]=[]
             
             if images is None:
                 self.last_updated = self.start_time
@@ -74,22 +74,15 @@ class Session:
                 self.images = images
                 
             
-            self.log : dict = {"name" : self.name,
-                                "start_time" : self.start_time.strftime(PRETTY_FORMAT),
-                                "last_updated": self.last_updated.strftime(PRETTY_FORMAT),
-                                "coords" : str(self.coords[0])+", " + str(self.coords[1]),
-                                "path" : str(self.directory),
-                                "images" : images
-                                }
             
-                
+            self.update_session_list()  
             self.write_to_log()
             
-            self.image_queue:queue.Queue = queue.Queue() 
+            self.image_queue:queue.Queue = queue.Queue(maxsize=8) 
             
             
         except Exception as e:
-            traceback.print_exc(e)
+            traceback.print_exception(e, file=sys.stderr)
     
     @property
     def details(self) -> dict:
@@ -98,9 +91,10 @@ class Session:
                     "last_updated": self.last_updated.strftime(PRETTY_FORMAT),
                     "coords" : str(self.coords[0])+", " + str(self.coords[1]),
                     "path" : str(self.directory),
-                    "images" : self.image_count
-                    
+                    "image_count" : self.image_count
                     }
+    
+    
     @property
     def queue_length(self) -> int:
         return self.image_queue.qsize()
@@ -112,41 +106,43 @@ class Session:
     def time_string(self, format:str="%Y-%m-%d %H:%M:%S") -> str:
         return datetime.strftime(self.start_time, format)
     
-    def add_image(self, image:cam_image.Cam_Image)-> int:
-        image.number = self.image_count
-        self.images.append(image)
+    def add_image(self, image:cam_image.Cam_Image)-> cam_image.Cam_Image:
+        image.set_number(self.image_count)
+        self.images.append(image.info)
         return image
     
     @property
     def image_count(self) -> int:
-        return len(self.images)
+        if self.images is not None:
+            return len(self.images)
     
     def add_image_to_queue(self, image:cam_image.Cam_Image):
         self.image_queue.put(image)
             
     def start_processing_queue(self):
-        for i in range(2):
-            process_thread = threading.Thread(target=self.process_image_queue)
-            process_thread.start()
+        process_thread = threading.Thread(target=self.process_image_queue)
+        process_thread.daemon = True
+        process_thread.start()
         
     def stop_processing_queue(self):
         self.image_queue.join()
     
-    def process_image_queue(self, test_arg:str) -> bool:
+    def process_image_queue(self) -> bool:
         while True:
-            image = self.image_queue.get()                
+            image = self.image_queue.get() 
+                           
             try:
                 image = self.add_image(image)
-                self.output(f"Processing image {image.number}")
+                self.output(f"Processing image {image.number} - Queue size {self.queue_length}")
             except Exception as e:
                 self.output("Warning: couldn't add image to session.images", error=True)
-                self.output(traceback.format_exc(e), error=True)
+                self.output(traceback.format_exception(e), error=True)
             
             try:
                 self.update_session_list()
             except Exception as e:
                 self.output("Warning: couldn't update session_list", error=True)
-                self.output(traceback.format_exc(e), error=True)
+                self.output(traceback.format_exception(e), error=True)
                                             
             
             try:        
@@ -155,40 +151,35 @@ class Session:
                 image.save(image_location, additional_metadata={"session" : self.name})
             except Exception as e:
                 self.output(f"Warning: couldn't save image {self.image_count-1}", error=True)
-                self.output(traceback.format_exc(e), error=True)
+                self.output(traceback.format_exception(e), error=True)
                                             
             try:    
                 self.write_to_log()
             except Exception as e:
                 self.output("Warning: couldn't write to log", error=True)
-                self.output(traceback.format_exc(e), error=True)
+                self.output(traceback.format_exception(e), error=True)
             try:                                
                 self.write_to_csv(image)
             except Exception as e:
                 self.output("Warning: couldn't add image details to csv", error=True)
-                self.output(traceback.format_exc(e), error=True)
-            
+                self.output(traceback.format_exception(e), error=True)
+            self.output(f"Finished processing image {image.number} - Queue size {self.queue_length}")
             self.image_queue.task_done()                          
             
 
     def write_to_log(self) -> bool:
-        try:
-
-            return write_json(self.log, self.session_list_file)
-        except Exception as e:
-            self.output(traceback.format_exc(e), error=True)
-            return False    
+            log = self.details
+            log["images"] = self.images
+            return write_json(log, self.session_list_file)
 
     def write_to_csv(self, image:cam_image.Cam_Image) -> bool:
-        try:
-            
             with open(self.csv_file_path, "a") as csv_file:
                 if csv_file.tell() == 0:
-                    csv_file.write(",".join(list(image.info.keys())))
-                csv_file.write(",".join(list(image.info.values())))
+                    csv_file.write(",".join(list(image.info.keys())) + "\n")
+                csv_file.write(",".join([str(value) for value in list(image.info.values())]) + "\n")
         
-        except:
-            pass
+
+            
     
     def update_session_list(self):
         session_list = {}
@@ -200,20 +191,22 @@ class Session:
                 session_list = {}
         
         session_list[self.name] = self.details
-        
         with open(self.session_list_file, "w") as session_list_file:
-            json.dump(session_list, ensure_ascii=False, indent=5)
+            json.dump(session_list, session_list_file, ensure_ascii=False, indent=5)
     
     
     def output(self, output:str|list, error:bool=False) -> bool:
         try:
             if not isinstance(output, (list, tuple)):
                 output = [[ output, datetime.now()],]
-
-            
+            try:    
+                if isinstance(output[-1], str):
+                    output = [["".join(output), datetime.now()],]
+            except:
+                pass
             if error:
                 for string, timestamp in output:
-                    print(f"{timestamp.strftime(PRETTY_FORMAT)}:\n {string}", file=sys.stderr)
+                    print(f"{timestamp.strftime(PRETTY_FORMAT)}: {string}", file=sys.stderr)
             
             with open(self.output_file_path, "a") as session_output_file:
                 for string, timestamp in output:
@@ -221,7 +214,7 @@ class Session:
                         
             return True
         except Exception as e:
-            traceback.print_exc(e)
+            traceback.print_exception(e, file=sys.stderr)
             return False
     
         
@@ -236,18 +229,16 @@ class Session:
             if string != "":
                 string += "\n"
             string += f"{key.rjust(18)}: {value}"   
-        return self.name           
+        return self.name         
+    
+      
 def write_json(log:dict, filepath:Path) -> bool:
-    try:
-        with open(filepath, "w") as session_log_file:
-            json.dump(log, session_log_file, indent=5, ensure_ascii=False)
-                        
-        return True
-    
-    except Exception as e:
-        traceback.print_exc(e)
-        return False                    
-    
+    with open(filepath, "w") as session_log_file:
+        json.dump(log, session_log_file, indent=5, ensure_ascii=False)
+                    
+    return True
+
+
     
 def confirm(message:str, default:bool=None) -> bool:
         if default is None:
@@ -419,7 +410,7 @@ def from_file(path:str|Path) -> Session:
         Session: A session object with details matching those in log file
     """    
     try:
-        log_file = Path(path) / "log.json"
+        log_file = Path(path) / "session.json"
         if not log_file.exists():
             print("Session does not exist")
             return None
@@ -428,7 +419,7 @@ def from_file(path:str|Path) -> Session:
         with open(log_file, mode="r") as file:
             session_dict = json.load(file)
         
-        name = session_dict["session"]
+        name = session_dict["name"]
         start_time = datetime.strptime(session_dict["start_time"], "%Y-%m-%d %H:%M:%S")
         coord_str = session_dict["coords"]
         coords = []
@@ -450,26 +441,6 @@ def from_file(path:str|Path) -> Session:
     
     
     except Exception as e:
-        traceback.print_exc(e)
+        traceback.print_exception(e)
         return None
-    
-def create_sessions_list(directory:str|Path):
-    if isinstance(directory, str):
-        directory = Path(directory)
-    list_file = directory / "session_list.json"
-    
-    if list_file.exists():
-        return True
-
-    #TODO: check for existing sessions in subfolders
-    def create_file():
-
-        with open(list_file, "w") as file:
-            file.write("{}")
-        return True
- 
-    
-
-    return create_file()
-
     
