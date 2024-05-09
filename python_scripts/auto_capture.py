@@ -9,6 +9,9 @@ from datetime import datetime, timedelta
 from time import time, sleep
 
 
+  
+
+
 import ms5837
 
 import routine
@@ -43,57 +46,68 @@ def main():
     
 
         
-    def print_and_log(*args, **kwargs):
+    def print_and_log(*args,  error=False, **kwargs):
         """Function for logging output of this script. If this is run from a systemd service the output should go to the RPi logs 
         to be read with journalctl, but this also writes to a file in the session which is loaded. If there is no session loaded 
         it saves the output until one is opened and then writes it.
         """
         try:
-                
+               
+            
             str_args = ""
             for arg in args:
                 if isinstance(arg, str):
                     str_args+=arg
                 else:
                     str_args+=str(arg)
-
-            
+                    
+            nonlocal current_session
             nonlocal stored_strings
+            if error:
+                kwargs['file'] = sys.stderr
             print(*args, **kwargs)
             if current_session is not None:
                 if stored_strings:
-                    current_session.output(stored_strings)
+                    current_session.output(stored_strings, error=error)
                     stored_strings = []
                     
-                current_session.output(str_args)
+                current_session.output(str_args, error=error)
                 
             else:
                 stored_strings.append([str_args, datetime.now()])
         except Exception as e: 
             #print(f"stderr: {sys.stderr}")
             #print(f"Kwargs: {kwargs} - Args: {args}", file=sys.stderr)
-            print(traceback.format_exc(e), file=sys.stderr)
+            print(traceback.format_exception(e), file=sys.stderr)
             #sys.exit("Error printing")
 
-    def log_error(error:Exception):
-        print("Error", file=sys.stderr)
+    def log_error(error:Exception=None, message:str=None):
+        
         nonlocal stored_strings
         nonlocal current_session
         try:
-            traceback.print_exc(error, file=sys.stderr)
-            string = "".join(traceback.format_exception(error))
+            traceback.print_exception(error,file=sys.stderr)
+            string = "ERROR: "
+            if message is not None:
+                string += message
+
+            if error is not None:
+                string += "\n"
+                string = "".join(traceback.format_exception(error))
+            string += "\n"
+            print(string, file=sys.stderr)
             print_and_log(string)
             if current_session is None:
                 with open(DATA_DIR / "sessions" / "error_log.log", "a") as log_file:
-                    log_file.write("---------------------------------------------------")
+                    log_file.write("---------------------------------------------------\n")
                     log_file.write(string)
         except Exception as e:
-            traceback.print_exc(e, file=sys.stderr)
+            traceback.print_exception(e,file=sys.stderr)
         
 
     def central_log(*args):
         with open(DATA_DIR / "sessions" / "central_log.log", "a") as log_file:
-            log_file.write("---------------------------------------------------")
+            log_file.write("---------------------------------------------------\n")
             string = "".join(args)
             log_file.write(string)
 
@@ -104,7 +118,7 @@ def main():
        for timestamp, string in stored_strings:
            central_log(f"{timestamp.strftime('%Y-%m-%d %H:%M:%S')}: {string}")
 
-    print_and_log("Running run_process.py")
+    
     #Argparse is a library used for parsing arguments passed to the script when it is called from the command line
     parser = argparse.ArgumentParser(description='Get session and routine arguments')
 
@@ -115,20 +129,24 @@ def main():
         
     #Attempt to open connection to the device - exit with error code 1 if not
     try:
+        
         device = ids_interface.Connection()
         
         if not device.connected:
             print_and_log("Could not connect to Device")
+            log_error(message="Could not connect to Device")
             sys.exit(1)
     except Exception as e:
         print_and_log("Could not connect to Device")
         log_error(e)
         sys.exit(1)
     
+
+    
     try:
         sensor = ms5837.MS5837_30BA()
         if not sensor.init():
-            print_and_log("Could not connect to Pressure Sensor")
+            log_error(message="Could not connect to Pressure Sensor")
             sys.exit("Could not connect to Pressure Sensor")
         
         sensor.setFluidDensity(ms5837.DENSITY_SALTWATER)
@@ -212,6 +230,7 @@ def main():
                 
                 image: Cam_Image = device.capture_frame(return_type=ids_interface.Resources.CAM_IMAGE, desired_exposure_time_microseconds=desired_exposure_time)
                 if image.image is None:
+                    print_and_log("Capture failed - retrying...")
                     continue
                 print_and_log("Capture Complete")
                 image.set_depth(get_depth(retry=True))
@@ -219,6 +238,7 @@ def main():
                 image.set_environment_temperature(get_temp(retry=True))
                 image.set_auto(auto)
                 current_session.add_image_to_queue(image)
+                print_and_log(f"Added to Queue - Queue size: {current_session.queue_length}")
                 if auto:
                     print_and_log("Auto")
                     attempt_no += 1
@@ -228,19 +248,16 @@ def main():
                     if not capture_successful:
                         new_exposure_time = ids_interface.calculate_new_exposure(current_exposure_time=image.integration_time/1e6, saturation_fraction=image.inner_saturation_fraction)
                         
-                        print_and_log(f"Attempt {attempt_no}: Incorrect Saturation - at {image.integration_time/1e6}s - trying at {new_exposure_time}s")
+                        print_and_log(f"Attempt {attempt_no}: Incorrect Saturation Fraction of {round(image.inner_saturation_fraction, 3)} - at {image.integration_time/1e6}s - trying at {new_exposure_time}s")
                         device.exposure_time(seconds=new_exposure_time)
                         exposure_time = new_exposure_time
                         desired_exposure_time = exposure_time*1e6
                     else:
-                        print_and_log(f"Attempt {attempt_no}: Correct saturation at {exposure_time}s")
+                        print_and_log(f"Attempt {attempt_no}: Correct saturation at {image.integration_time/1e6}s")
                         capture_successful = True
                 else:
                     capture_successful = True
-                    try: 
-                        test_err = ids_interface.calculate_new_exposure(current_exposure_time=image.integration_time/1e6)
-                    except Exception as e:
-                        log_error(e)
+
                         
             
             print_and_log(f"Captured Image #{current_routine.image_count}")
@@ -252,7 +269,7 @@ def main():
             log_error(e)
         
 
-    print("Got here", file=sys.stderr)
+    
 
     # Parse command line arguments
     args = parser.parse_args()
@@ -287,6 +304,7 @@ def main():
                     break
                 except Exception as e:
                     pass
+                
             if filename.rsplit(".",1)[1].lower() in ["txt", "yaml", "yml"]:
                 try:
                     this_routine = routine.from_file(Path(routine_dir) / filename, capture_function=capture_image)
@@ -300,8 +318,8 @@ def main():
 
     #If no matching routine can be found, log an error and exit
     if current_routine is None:
-        print_and_log(f"Routine {routine_name} does not exist.\nMake sure routine name has no spaces\n Exiting.")
-        log_error(Exception("Routine not found"))
+        print_and_log(f"Routine {routine_name} does not exist.\nMake sure routine name has no spaces\n Exiting.", error=True)
+        log_error(Exception(f"Routine {routine_name} not found"))
         sys.exit(1)
     
 
@@ -418,6 +436,7 @@ def main():
     check_time_short = time()
     
     current_session.start_processing_queue()
+
     
     with os.fdopen(in_pipe_fd) as in_pipe:
         while not complete:
@@ -444,15 +463,15 @@ def main():
 
                 
                 if not current_routine.stop_signal:   
-                    if time() - check_time_long > 120:
+                    if time() - check_time_long > 300:
                         print_and_log(f"Device Temp: {device.get_temperature()}°C  Depth: {get_depth():.2f}m Pressure Sensor Temp: {get_temp():.2f}°C")
                         check_time_long = time()
-                        
+
     
                 if time() - check_time_short > 1:
                     check_time_short = time()
                     try:
-                        message = f"Routine: {current_routine.name}\nSession: {current_session.name}\nRuntime: {str(timedelta(seconds=int(current_routine.run_time)))}\nImages Captured: {current_routine.image_count}\nImage Save Queue Size: {current_session.image_queue.qsize()}"
+                        message = f"Routine: {current_routine.name}\nSession: {current_session.name_no_spaces}\nRuntime: {str(timedelta(seconds=int(current_routine.run_time)))}\nImages Captured: {current_routine.image_count}\nImage Save Queue Size: {current_session.queue_length}\n"
                         if current_routine.stop_signal:
                             message  += "\nSTOPPING\n"
                         write_to_pipe(message)
@@ -497,5 +516,5 @@ if __name__ == '__main__':
         print(e)
         sys.exit(1)
     except Exception as e:
-        traceback.print_exc(e)
+        traceback.print_exception(e)
         sys.exit(1)
