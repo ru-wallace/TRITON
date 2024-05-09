@@ -116,7 +116,7 @@ def calc_relative_luminance(image : Image.Image | np.ndarray, mask: Image.Image|
     except Exception as e:
         print("Error calculating mean linear values:", file=sys.stderr)
         print(f"Lin_array shape: {lin_array.shape}", file=sys.stderr)
-        traceback.print_exc(e)
+        traceback.print_exception(e)
     xyz = lin_sRGB_to_XYZ(mean_lin)
     relative_luminance = xyz[1]
 
