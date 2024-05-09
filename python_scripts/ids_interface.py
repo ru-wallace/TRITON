@@ -87,7 +87,7 @@ class Connection:
             try:
                 ids_peak.Library.Initialize()
             except Exception as e:
-                traceback.print_exc(e)
+                traceback.print_exception(e)
                 self.printq("Failed to Initialise API Library")
             
             self.acquisition_running = False
@@ -101,9 +101,9 @@ class Connection:
                 self.connected = self.open_connection()
             except Exception as e:
                 self.connected = False
-                traceback.print_exc(e)
+                traceback.print_exception(e)
         except Exception as e:
-            traceback.print_exc(e)            
+            traceback.print_exception(e)            
             
 
     
@@ -188,7 +188,7 @@ class Connection:
                 
             return True
         except Exception as e:
-            traceback.print_exc(e)
+            traceback.print_exception(e)
             return False
      
     def activate_chunks(self):
@@ -201,7 +201,7 @@ class Connection:
                 self.node("ChunkSelector").SetCurrentEntry(chunk)
                 self.node("ChunkEnable").SetValue(True)
             except Exception as e:
-                traceback.print_exc(e)
+                traceback.print_exception(e)
         
         self.node("ChunkModeActive").SetValue(True)   
     
@@ -244,7 +244,7 @@ class Connection:
             self.info = {}
             
         except Exception as e:
-            traceback.print_exc(e)
+            traceback.print_exception(e)
             
     def alloc_and_announce_buffers(self)-> bool:
         """Allocates and announces buffers to be used for storing and transferring camera picture data.
@@ -275,7 +275,7 @@ class Connection:
         
                 return True
         except Exception as e:
-            traceback.print_exc(e)
+            traceback.print_exception(e)
             return False
     
     def capture_image(self, auto=False):
@@ -396,7 +396,7 @@ class Connection:
                    
             
         except Exception as e:
-            traceback.print_exc(e)
+            traceback.print_exception(e)
             return False
     
     def start_acquisition(self) -> bool:
@@ -446,7 +446,7 @@ class Connection:
             return True
 
         except Exception as e:
-            traceback.print_exc(e)
+            traceback.print_exception(e)
             return False
     
     
@@ -485,7 +485,7 @@ class Connection:
             return True
             
         except Exception as e:
-            traceback.print_exc(e)
+            traceback.print_exception(e)
             return False
     
     
@@ -516,7 +516,7 @@ class Connection:
             while buffer is None:
                 try:
 
-                    buffer = self.datastream.WaitForFinishedBuffer(buff_time)
+                    buffer = self.datastream.WaitForFinishedBuffer(ids_peak.DataStream.INFINITE_NUMBER)
                     if buffer.HasChunks():
                         self.nodemap.UpdateChunkNodes(buffer)
                         exposure = self.node("ChunkExposureTime").Value()
@@ -537,7 +537,7 @@ class Connection:
                     buff_time += 100
                     attempts +=1
                     if attempts > 10:
-                        traceback.print_exc(e)
+                        traceback.print_exception(e)
                         break
             
 
@@ -585,7 +585,7 @@ class Connection:
 
 
         except Exception as e:
-            traceback.print_exc(e, file=sys.stderr)
+            traceback.print_exception(e, file=sys.stderr)
             return False
     
    
@@ -655,7 +655,7 @@ class Connection:
             return current_time
         except Exception as e:
             print(f"Error changing exposure time to {microseconds} microseconds", file=sys.stderr)
-            traceback.print_exc(e)
+            traceback.print_exception(e)
     
     def gain(self, gain:float=None) -> float:
         """Query or set gain in dB
@@ -674,7 +674,7 @@ class Connection:
                 
             return self.node("Gain").Value()
         except Exception as e:
-            traceback.print_exc(e)
+            traceback.print_exception(e)
     
     
 
@@ -732,7 +732,7 @@ class Connection:
             self.node("UserSetSave").WaitUntilDone()
             return True
         except Exception as e:
-            traceback.print_exc(e)
+            traceback.print_exception(e)
             return False
     
     # Load default user settings
@@ -762,7 +762,7 @@ class Connection:
             
             return True
         except Exception as e:
-            traceback.print_exc(e)
+            traceback.print_exception(e)
             return False
     
     
@@ -777,7 +777,7 @@ class Connection:
             self.node("UserSetSelector").SetCurrentEntry(current_profile)
             return True
         except Exception as e:
-            traceback.print_exc(e)
+            traceback.print_exception(e)
             return False
         
         
@@ -798,7 +798,7 @@ class Connection:
                 except Exception as e:
                     self.printq(f"Could not set value of node '{node_name}'")
         except Exception as e:
-            traceback.print_exc(e)
+            traceback.print_exception(e)
             return False
     
 
@@ -828,8 +828,7 @@ def calculate_new_exposure(current_exposure_time, saturation_fraction:float, tar
     
     #The adjustment scales with the ralationship between the size of the saturation error and the target saturation fraction
     #If the difference is large, the adjustment is large, and vice versa. This is fairly quick but could probably be optimised (Maybe with a PID type control?)
-    
-    proportional_adjustment = overexposed_difference/0.001
+
     adjustment_factor = min(10, max(0.1, 1 - (overexposed_difference)/target_fraction ))
     
 
@@ -941,7 +940,7 @@ def calculate_sharpness(image:ids_peak_ipl.Image, roi:ids_peak_ipl.Rect2D=None, 
     
     
     except Exception as e:
-        traceback.print_exc(e)
+        traceback.print_exception(e)
         return None
     
 def convert_image(image:ids_peak_ipl.Image, target_format:str)->ids_peak_ipl.Image:    
@@ -961,6 +960,6 @@ def get_depth() ->float|bool:
         return 0
     
     except Exception as e:
-            traceback.print_exc(e)
+            traceback.print_exception(e)
             return False
 
