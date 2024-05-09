@@ -128,7 +128,7 @@ class Cam_Image:
             self._environment_temp : float = environment_temp
             
         except Exception as e:
-            traceback.print_exc(e)
+            traceback.print_exception(e)
             
     
     
@@ -237,7 +237,7 @@ class Cam_Image:
 
         
         self._concentric_saturation_fractions = {}
-        for name, mask in self._concentric_masks.items():
+        for name, mask in list(self._concentric_masks.items()):
             self._concentric_saturation_fractions[f"concentric_saturation_fraction_{name}"] = get_fraction_white_pixels(self._image_array, mask=mask, saturation_threshold=self.saturation_threshold)
     
     def _get_pixel_averages(self) -> None:
@@ -458,7 +458,7 @@ class Cam_Image:
         try:
             self.image.show()
         except Exception as e:
-            traceback.print_exc(e) 
+            traceback.print_exception(e) 
             
     def save(self, path:str|Path, additional_metadata:dict=None) -> bool:
         """Save: Save Image using PIL Image.Image.save() function. Also saves image
@@ -471,24 +471,20 @@ class Cam_Image:
         Returns:
             bool: True if saving is successful, False otherwise
         """        
-        try:
+
             
-            metadata = self.metadata(additional_items=additional_metadata)
-            
-            
-            if isinstance(path, str):
-                try:
-                    path = Path(path)
-                except:
-                    print("Saving unsuccessful: unable to resolve file path")
-                    return False
-            self.image.save(path, pnginfo=metadata)
-            return True
-        except Exception as e:
-            print("Unable to Save Image")
-            traceback.print_exc(e)
-            return False
-            
+        metadata = self.metadata(additional_items=additional_metadata)
+        
+        
+        if isinstance(path, str):
+            try:
+                path = Path(path)
+            except:
+                print("Saving unsuccessful: unable to resolve file path")
+                return False
+        self.image.save(path, pnginfo=metadata)
+        return True
+
             
 #functions
         
@@ -617,7 +613,7 @@ def create_metadata(image:Cam_Image, additional_items:dict=None) ->PngInfo:
         return metadata
        
     except Exception as e:
-        traceback.print_exc(e)     
+        traceback.print_exception(e)     
         
         
 def get_fraction_white_pixels(image: Image.Image, mask: Image.Image = None, invert_mask:bool=False, saturation_threshold:int=255) -> float:
@@ -767,7 +763,7 @@ def create_circle_mask(image:np.ndarray, centre:tuple, radius:int|list) -> Image
     except Exception as e:
         print("Initial Radius: ", initial_radius, file=sys.stderr)
         print("Radius: ", radius, file=sys.stderr)
-        traceback.print_exc(e, file=sys.stderr)
+        traceback.print_exception(e, file=sys.stderr)
         raise Exception("AAAgggh")
     
 
