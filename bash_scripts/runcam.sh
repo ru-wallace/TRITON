@@ -74,17 +74,45 @@ while [[ $# -gt 0 ]]; do
 
         -q|--query)
             echo -n "Checking for process..."
-            RUNCAM_STATUS=$(timeout 3 cat "$PIPE_OUT_FILE")
-            echo -en "\e[K"
-            if [ -z "${RUNCAM_STATUS}" ]; then
-                echo -e "\rNo Runcam processes detected"
+            if [ -p "$PIPE_OUT_FILE" ]; then
+                RUNCAM_STATUS=$(timeout 3 cat "$PIPE_OUT_FILE")
+                echo -en "\e[K"
+                if [ -z "${RUNCAM_STATUS}" ]; then
+                    echo -e "\rNo Runcam processes detected"
+                else
+                    echo -e "\rStatus: $RUNCAM_STATUS"
+                fi
             else
-                echo -e "\rStatus: $RUNCAM_STATUS"
+                echo -e "\rNo Runcam processes detected"
+            fi
+            exit 0
+            ;;
+        
+            -l|--log)
+            echo -n "Checking for process..."
+            if [ -p "$PIPE_OUT_FILE" ]; then
+                RUNCAM_STATUS=$(timeout 3 cat "$PIPE_OUT_FILE")
+                echo -en "\e[K"
+                if [ -z "${RUNCAM_STATUS}" ]; then
+                    echo -e "\rNo Runcam processes detected"
+                else
+                    echo -e "\rStatus: $RUNCAM_STATUS"
+                    RUNCAM_SESSION_LINE=$(grep "^Session: " <<< "$RUNCAM_STATUS")
+                    RUNCAM_SESSION="${RUNCAM_SESSION_LINE#Session: }" 
+                    echo -e "Session: $RUNCAM_SESSION"
+                    tail -f "$DATA_DIRECTORY/sessions/$RUNCAM_SESSION/output.log"
+                fi
+            else
+                echo -e "\rNo Runcam processes detected"
             fi
             exit 0
             ;;
         -x|--stop)
             echo -n "Checking for process..."
+            if ! [ -p "$PIPE_OUT_FILE" ]; then
+                echo -e "\rNo Runcam processes detected"
+                exit 0
+            fi
             RUNCAM_STATUS=$(timeout 3 cat "$PIPE_OUT_FILE")
             if [ -z "${RUNCAM_STATUS}" ]; then
                 echo -e "\rNo Runcam processes detected"
@@ -146,7 +174,9 @@ while [[ $# -gt 0 ]]; do
         --run)
             if [ -n "$2" ]; then
                 PYTHON_SCRIPT="$2"
-                python "$PYTHON_SCRIPT"
+                shift 2
+
+                python "$PYTHON_SCRIPT" "$@"
                 exit 0
             else
                 echo "Error: Argument for $1 is missing" >&2
@@ -181,15 +211,22 @@ fi
 
 
 echo -n "Checking for already running process..."
-RUNCAM_STATUS=$(timeout 3 cat "$PIPE_OUT_FILE")
-if [ -z "${RUNCAM_STATUS}" ]; then
-    echo -e "\rNo Runcam processes detected  - Starting AEGIR            "
+if [ -p "$PIPE_OUT_FILE" ]; then
+    RUNCAM_STATUS=$(timeout 3 cat "$PIPE_OUT_FILE")
+    echo -en "\e[K"
+    if [ -z "${RUNCAM_STATUS}" ]; then
+        echo -e "\rNo Runcam processes detected            "
+    else
+        echo -e "\rRuncam process already running:         "
+        echo "$RUNCAM_STATUS"
+        echo "Use 'runcam -x' to stop a currently running process"
+        echo "Exiting..."
+        exit 1
+    fi
 else
-    echo -e "\rRuncam process already running:       "
-    echo "$RUNCAM_STATUS"
-    echo "Exiting..."
-    exit 1
+    echo -e "\rNo Runcam processes detected            "
 fi
+
 
 
 #For setting up IDS Peak libraries
