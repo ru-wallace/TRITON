@@ -449,7 +449,7 @@ def main():
                     if message == "STOP":
                         current_routine.stop_signal = True
                         print_and_log("Received STOP Message")
-                        if current_routine.capturing_image:
+                        if current_routine.capturing_images:
                             print_and_log("Waiting for image capture to finish...")
                         else: 
                             print_and_log("Stopping")
@@ -464,7 +464,7 @@ def main():
                 
                 if not current_routine.stop_signal:   
                     if time() - check_time_long > 300:
-                        print_and_log(f"Device Temp: {device.get_temperature()}°C  Depth: {get_depth():.2f}m Pressure Sensor Temp: {get_temp():.2f}°C")
+                        print_and_log(f"Runtime: {str(timedelta(seconds=int(current_routine.run_time)))} Device Temp: {device.get_temperature()}°C  Depth: {get_depth():.2f}m Pressure Sensor Temp: {get_temp():.2f}°C")
                         check_time_long = time()
 
     
