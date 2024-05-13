@@ -170,7 +170,7 @@ class Session:
     def write_to_log(self) -> bool:
             log = self.details
             log["images"] = self.images
-            return write_json(log, self.session_list_file)
+            return write_json(log, self.json_file_path)
 
     def write_to_csv(self, image:cam_image.Cam_Image) -> bool:
             with open(self.csv_file_path, "a") as csv_file:
