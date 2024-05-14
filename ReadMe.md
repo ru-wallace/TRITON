@@ -43,34 +43,19 @@ The tools will only work on Linux based operating systems. The system is designe
 
     Conda has no built-in function for installing modules from .whl wheel files but using pip will install it in the environment. The "--no-deps" option ensures that only the IDS files will be installed and not any of their listed dependencies. Use conda where possible to install any dependencies which are required beyond that.
 
-- Run the install script by navigating to the install directory and using:
+- Run the install script by navigating to the main directory and using:
 
         sudo bash bash_scripts/install.sh
 
-  You must use sudo as the install script modifies a system setting for the USB IO buffer memory size ([See this page in the IDS Peak manual for details](https://www.1stvision.com/cameras/IDS/IDS-manuals/en/operate-usb3-hints-linux.html)).
+  You must use sudo to run the script as the root user as the install script modifies a system setting for the USB IO buffer memory size ([See this page in the IDS Peak manual for details](https://www.1stvision.com/cameras/IDS/IDS-manuals/en/operate-usb3-hints-linux.html)) and modifies the permissions of files in the application.
+  
+  The script asks for the directory in which the user would like captured data to be stored, and the location of the ids peak installation so that the drivers for the IDS camera can be used.
+  It creates a ".env" file in the main installation directory containing environment variables used for running AEGIR.
+  It creates a directory in the specified location (by default in the ```/home/[user]/``` directory), and creates two further sub-directories - ```routines``` and ```sessions``` - which will be the location in which routines will be read and captured data stored respectively. Example routines are included in the ```routines``` directory.
 
-  This script allows you to use the command:
+  Once the installation has completed successfully, you can run the application from the shell from any location using:
 
-        runcam [options]
-
-  from the terminal, regardless of current directory.
-  The install script also creates a ".env" file in the ```./python_scripts/``` subdirectory. This is where we store environment variables that are used throughout the program, mainly the locations of directories.
-
-- Update the new ```./python_scripts/.env``` file:
-  - If you want to specify the default location in which data files and camera routine files are stored, edit the line:
-            DATA_DIRECTORY="[desired location of output files]"
-
-    Make sure there are no spaces before or after the '=' and insert your desired location.
-    e.g if your username is ```user1```:
-
-            DATA_DIRECTORY="/home/user1/radiance_files"
-
-    If this is not set, the default directory will be set as a subfolder of the directory where this code is, named ```TRITON/```.
-
-    Data captured by the camera and processed by TRITON will be kept in the ```sessions/``` subdirectory of this.
-    Routine files which are used to define instructions for auto capture are kept in the ```routines/``` subdirectory of the data directory.
-
-  - If needed, edit the other three lines to reflect the location of the directory in which IDS Peak is installed. By default this is in ```/opt/[ids_peak_version]/....```
+        runcam [options]  
   
 ## Concepts
 
@@ -87,16 +72,31 @@ A session (for want of a better name) is a set of images stored together in a si
 - Name
 - Start time
 - Co-ords (optional)
-- Notes (Not yet implemented)
 - Images
 
 Each session is stored in the ```[data directory]/sessions/``` subdirectory in a directory with the same name as the session.
-The directory contains the following files:
+The directory uses the following structure:
 
-- ```log.json```: Every session has this file. it contains a list of each image captured in the session, metadata including the time, number, camera temperature, integration time, gain, depth (yet to be implemented), and the raw and processed measurements calculated for that image (see [Image Processing](#image-processing)).
-- ```run_log.txt```: If any images in the session are captured using an auto-capture routine, this file will be present. It contains the output of the auto_capture.py python script as it executes the routine. This is useful for debugging if there is an issue with the routine running.
--```run_[number].csv```: Every time a routine is run which adds images to the session , a new run csv file is added which contains all the white balance and pixel averages of each photo as well as the exposure time and device temperatures.
--```[numbers].png``` The Image files.
+        .../AEGIR_DATA/sessions/[session name]/
+        |       images/
+        |       |.......[session_name]_000.png
+        |       |.......[session_name]_001.png
+        |       |.......[session_name]_002.png
+        |       |.......etc..
+        |
+        |.......session.json
+        |.......images.csv
+        |.......output.log
+
+-```images/```: A subdirectory containing the image files as PNGs. Each image file has its metadata embedded in the file, which can be accessed in various ways, including using the Python Image Library (PIL) Image.metadata() function. As a last resort, opening the image using notepad or a similar text editor will also show the data in slightly mangled plain text, along with the binary pixel data of the image.
+
+- ```session.json```: Every session has this file. it contains a list of each image captured in the session, and metadata including the time, number, camera temperature, integration time, gain, and the raw and processed measurements calculated for that image (see [Image Processing](#image-processing)).
+
+-```images.csv```: Every time a routine is run which adds images to the session , a new run csv file is added which contains all the white balance and pixel averages of each photo as well as the exposure time and device temperatures and all the metadata.
+
+- ```output.log```: If any images in the session are captured using an auto-capture routine, this file will be present. It contains the output of the auto_capture.py python script as it executes the routine. This is useful for debugging if there is an issue with the routine running.
+
+
 
 ### Image Processing
 
