@@ -93,7 +93,7 @@ class Sharpness_Tool:
                 self.ROI = ids_interface.make_ROI_start_centre(image, size=600)
                     
             sharpness = ids_interface.calculate_sharpness(image, self.ROI)
-            print(f"Sharpness: {round(sharpness, 2)} Integration Time: {self.exposure_time/1000000}s ({self.exposure_time}us)", end=f"   \r", flush=True)
+            print(f"Sharpness: {round(sharpness, 2)} Integration Time: {self.exposure_time/1000000}s ({self.exposure_time}μs)", end=f"   \r", flush=True)
             sys.stdout.flush()
         except Exception as e:
             self.last_error = e
