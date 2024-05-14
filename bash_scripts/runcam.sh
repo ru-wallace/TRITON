@@ -1,14 +1,19 @@
 #!/bin/bash
 
+
+USB_BUFFER_SIZE=$(cat /sys/module/usbcore/parameters/usbfs_memory_mb)
+
+
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 BASE_DIR="$(dirname "$SCRIPT_DIR")"
 
+ENV_FILE="$BASE_DIR/.env"
 
-if [ -f "$BASE_DIR/python_scripts/.env" ]
+if [ -f "$ENV_FILE" ]
     then # load environment variables from .env file
-    export $(grep -v '^#' "$BASE_DIR/python_scripts/.env" | xargs)
+    export $(grep -v '^#' "$ENV_FILE" | xargs)
     else
-    echo "Error: .env file not found"
+    echo "Error: .env file not found - use $SCRIPT_DIR/install.sh to create one"
     exit 1
 fi
 
@@ -27,6 +32,16 @@ conda activate ids_device
 # Parse options
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        -b|--buffer)
+            if [ "$EUID" -eq 0 ]; then
+                echo "Increasing USB buffer size to 1000mb..."
+                echo 1000 > /sys/module/usbcore/parameters/usbfs_memory_mb
+            else
+                echo "Error: Must be root to increase USB buffer size"
+                echo "Exiting..."
+                exit 1
+            fi
+            ;;
         -c|--console)
             python "$BASE_DIR/python_scripts/console_interface.py"
             exit 0
@@ -208,7 +223,9 @@ if [ -z "$SESSION_NAME" ]; then
     exit 1
 fi
 
-
+if [ "$USB_BUFFER_SIZE" -lt 1000 ]; then
+        echo "Warning: USB buffer size is less than 1000mb. Please run 'runcam -b' as root to increase the buffer size."
+fi
 
 
 echo -n "Checking for already running process..."

@@ -19,7 +19,9 @@ import session
 import ids_interface
 from cam_image import Cam_Image
 
-load_dotenv()
+
+env_location = Path(__file__).parent.parent / ".env"
+load_dotenv(env_location)
 
 DATA_DIR = Path(os.environ.get("DATA_DIRECTORY"))
 PIPE_IN_FILE = Path(os.environ.get("PIPE_IN_FILE"))
