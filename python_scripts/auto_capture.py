@@ -49,8 +49,7 @@ def main():
 
         
     def print_and_log(*args,  error=False, **kwargs):
-        """Function for logging output of this script. If this is run from a systemd service the output should go to the RPi logs 
-        to be read with journalctl, but this also writes to a file in the session which is loaded. If there is no session loaded 
+        """Function for logging output of this script. Writes the passed strings to a file in the session which is loaded using the session.output() function. If there is no session loaded 
         it saves the output until one is opened and then writes it.
         """
         try:
@@ -108,6 +107,15 @@ def main():
         
 
     def central_log(*args):
+        """
+        Writes the given arguments to the central log file.
+
+        Args:
+            *args: Variable number of arguments to be written to the log file.
+
+        Returns:
+            None
+        """
         with open(DATA_DIR / "sessions" / "central_log.log", "a") as log_file:
             log_file.write("---------------------------------------------------\n")
             string = "".join(args)
@@ -116,19 +124,23 @@ def main():
           
 
     def flush_stored_strings():
-       nonlocal stored_strings 
-       for timestamp, string in stored_strings:
-           central_log(f"{timestamp.strftime('%Y-%m-%d %H:%M:%S')}: {string}")
+        """
+        Flushes the stored strings by printing them to the central log file in the data directory.
 
-    
-    #Argparse is a library used for parsing arguments passed to the script when it is called from the command line
-    parser = argparse.ArgumentParser(description='Get session and routine arguments')
+        This function iterates over the stored strings and prints each string along with its timestamp
+        to the central log. The timestamp is formatted as 'YYYY-MM-DD HH:MM:SS'.
 
-    # Set up the named arguments
-    parser.add_argument('--routine', help='Routine', required=True)
-    parser.add_argument('--session', help='Session', required=True)
-    parser.add_argument('--complete',action='store_true')
-        
+        Parameters:
+            None
+
+        Returns:
+            None
+        """
+        nonlocal stored_strings 
+        for timestamp, string in stored_strings:
+            central_log(f"{timestamp.strftime('%Y-%m-%d %H:%M:%S')}: {string}")
+
+   
     #Attempt to open connection to the device - exit with error code 1 if not
     try:
         
@@ -143,7 +155,7 @@ def main():
         log_error(e)
         sys.exit(1)
     
-
+    #Attempt to open connection to the pressure sensor - exit with error code 1 if not
     
     try:
         sensor = ms5837.MS5837_30BA()
@@ -157,6 +169,8 @@ def main():
         log_error(e)
         sys.exit("Could not connect to Pressure Sensor")
     
+
+    #Define functions to get the depth, pressure and temperature from the pressure sensor
     def get_depth(retry:bool=False) -> float:
         try:
             sensor.read()
@@ -197,81 +211,111 @@ def main():
                 temp : float = 0.0
         return temp
     
+    #Function to capture an image from the camera
+    #This function is passed to the routine object and is called when the routine wants to capture an image
+    #It takes an integration time in seconds, a gain value and a boolean for auto exposure
+    #If the integration time is 0 or None, the function will use auto exposure
+    def capture_image(integration_time_secs: float = None, gain: float = None, auto: bool = False):
+        """
+        Capture an image using the specified integration time, gain, and auto-exposure settings.
 
-    def capture_image(integration_time_secs:float=None, gain:float=None, auto:bool=False):
+        Args:
+            integration_time_secs (float, optional): Integration time in seconds. If set to 0 or None, auto-adjust integration time mode will be used. Defaults to None.
+            gain (float, optional): Device gain value. If provided, the device gain will be changed to this value. Defaults to None.
+            auto (bool, optional): Flag indicating whether to use auto-exposure mode. If True, auto-exposure mode will be used regardless of the integration time value. Defaults to False.
+
+        Raises:
+            Exception: If an error occurs while capturing the image.
+
+        Returns:
+            None
+        """
         try:
-            
             nonlocal current_session
             nonlocal current_routine
-            
-            exposure_time = device.exposure_time()/1e6
+
+            exposure_time = device.exposure_time() / 1e6
             image_string = f"Capturing Image #{current_session.image_count + current_session.queue_length}(Routine image#{current_routine.image_count}) - Integration Time : {integration_time_secs}s"
             if auto:
                 image_string += "- Auto Exposure"
             print_and_log(image_string)
-            
 
             if gain is not None:
-                device.gain(gain) #Change device gain if it is passed 
-            
+                device.gain(gain)  # Change device gain if it is passed
 
-            #Switch to auto-adjust integration time mode if integration time is 0 or None
-            #Otherwise, set the integration time to the passed value.
+            # Switch to auto-adjust integration time mode if integration time is 0 or None
+            # Otherwise, set the integration time to the passed value.
             if integration_time_secs == 0 or integration_time_secs is None or auto:
                 auto = True
             else:
-                exposure_time = device.exposure_time(seconds=integration_time_secs)/1e6
+                exposure_time = device.exposure_time(seconds=integration_time_secs) / 1e6
                 print_and_log(f"Set Exposure Time to {exposure_time}s")
-              
+
             capture_successful = False
             image = None
             attempt_no = 0
-            desired_exposure_time = integration_time_secs*1e6 if not auto else None
-            while not capture_successful:
+
+            # The device may have old images in the buffer with different integration times, 
+            #so we need to set the desired integration time to the new value and it will flush the buffer until an image is captured with the new integration time.
+            desired_exposure_time = integration_time_secs * 1e6 if not auto else None 
+            while not capture_successful: # Keep trying to capture an image until it is successful
                 print_and_log("Capturing...")
-                
-                image: Cam_Image = device.capture_frame(return_type=ids_interface.Resources.CAM_IMAGE, desired_exposure_time_microseconds=desired_exposure_time)
-                if image.image is None:
+
+                image: Cam_Image = device.capture_frame(return_type=ids_interface.Resources.CAM_IMAGE,
+                                                        desired_exposure_time_microseconds=desired_exposure_time) # Capture an image.
+                if image.image is None: #Sometimes the camera fails to capture an image. If this happens, retry.
                     print_and_log("Capture failed - retrying...")
                     continue
                 print_and_log("Capture Complete")
+                # Add the pressure, depth, and temperature to the image object and set whether it was an auto exposure capture.
                 image.set_depth(get_depth(retry=True))
                 image.set_pressure(get_pressure(retry=True))
                 image.set_environment_temperature(get_temp(retry=True))
                 image.set_auto(auto)
+                # Add the image to the session queue to be processed by the session thread
                 current_session.add_image_to_queue(image)
                 print_and_log(f"Added to Queue - Queue size: {current_session.queue_length}")
+                # If in auto mode, check if the image has the correct saturation level and use the ids_interface.calculate_new_exposure() function to calculate a new exposure time if it does not.
                 if auto:
                     print_and_log("Auto")
                     attempt_no += 1
-                    
+
                     capture_successful = image.correct_saturation
                     print_and_log("capture_successful: ", image.correct_saturation)
                     if not capture_successful:
-                        new_exposure_time = ids_interface.calculate_new_exposure(current_exposure_time=image.integration_time/1e6, saturation_fraction=image.inner_saturation_fraction)
-                        
-                        print_and_log(f"Attempt {attempt_no}: Incorrect Saturation Fraction of {round(image.inner_saturation_fraction, 3)} - at {image.integration_time/1e6}s - trying at {new_exposure_time}s")
+                        new_exposure_time = ids_interface.calculate_new_exposure(
+                            current_exposure_time=image.integration_time / 1e6,
+                            saturation_fraction=image.inner_saturation_fraction)
+
+                        print_and_log(
+                            f"Attempt {attempt_no}: Incorrect Saturation Fraction of {round(image.inner_saturation_fraction, 3)} - at {image.integration_time / 1e6}s - trying at {new_exposure_time}s")
                         device.exposure_time(seconds=new_exposure_time)
                         exposure_time = new_exposure_time
-                        desired_exposure_time = exposure_time*1e6
+                        desired_exposure_time = exposure_time * 1e6
                     else:
-                        print_and_log(f"Attempt {attempt_no}: Correct saturation at {image.integration_time/1e6}s")
+                        print_and_log(f"Attempt {attempt_no}: Correct saturation at {image.integration_time / 1e6}s")
                         capture_successful = True
                 else:
                     capture_successful = True
 
-                        
-            
             print_and_log(f"Captured Image #{current_routine.image_count}")
             print_and_log(f"Timestamp: {image.time_string('%Y-%m-%d %H:%M:%S')}")
-            print_and_log(f"Integration Time: {image.integration_time/1e6}s ")
-            
+            print_and_log(f"Integration Time: {image.integration_time / 1e6}s ")
+
         except Exception as e:
             print_and_log(f"Error Capturing Image {current_routine.image_count}")
             log_error(e)
         
 
-    
+     
+    #Argparse is a library used for parsing arguments passed to the script when it is called from the command line
+    parser = argparse.ArgumentParser(description='Get session and routine arguments')
+
+    # Set up the named arguments
+    parser.add_argument('--routine', help='Routine', required=True)
+    parser.add_argument('--session', help='Session', required=True)
+    parser.add_argument('--complete',action='store_true')
+        
 
     # Parse command line arguments
     args = parser.parse_args()
@@ -285,7 +329,7 @@ def main():
     print_and_log(f'Session Name: {session_name}')
     
 
-        #Set the location of the routine files
+    #Set the location of the routine files
     routine_dir=DATA_DIR / "routines"
     
     current_routine: routine.Routine = None
@@ -322,6 +366,7 @@ def main():
     if current_routine is None:
         print_and_log(f"Routine {routine_name} does not exist.\nMake sure routine name has no spaces\n Exiting.", error=True)
         log_error(Exception(f"Routine {routine_name} not found"))
+        flush_stored_strings()
         sys.exit(1)
     
 
@@ -381,17 +426,23 @@ def main():
     print_and_log(f"Running routine {current_routine.name}...")
     print_and_log(str(current_routine))
     
-    #Run routine loop
+    #Run routine loop (see routine.py for more info on how this works)
     #The routine uses a "tick" system. 
     #
-    #A while loop is started, and each "tick" the object checks the time since the routine 
+    # A while loop is started, and on each "tick" the object checks the time since the routine 
     # started and when the next capture should be to automatically capture photos
     # using the settings defined in the routine file.
-    # Each tick returns a dict object with:
-    #               - a boolean "complete" property which is False until the routine is completed.
-    #               - an "image" property which is None unless an image was captured with that tick, in which case it is a Cam_Image object
-    #               - an "Image count" property which has the number of images captured so far in this run of the routine.
-    
+    # It adds the capture settings to a queue which is processed by a separate thread.
+    # Each capture is added to the session queue with a timestamp and other data, including the pressure, temperature, etc. 
+    # Another thread defined in the sessions.py file processes the queue and saves the images to the session directory.
+    # The routine will continue to tick until the routine is complete or a stop signal is received.
+    # The stop signal can be sent from the console interface using runcam -x.
+    # The routine will then finish the current capture and stop.
+    # The session thread will finish processing the queue and save the images.
+
+    #The program uses Named Pipes to communicate with the console interface. This allows the interface to send a stop signal to the script, 
+    #and for the script to send messages back to the interface allowing the user to view the progress of the current capture routine using "runcam -q"
+    # or "runcam -l" to view the live output log.
     
 
     if not os.path.exists(PIPE_IN_FILE):
@@ -400,6 +451,7 @@ def main():
     if not os.path.exists(PIPE_OUT_FILE):
         os.mkfifo(PIPE_OUT_FILE)
     
+    #Set the camera to continuous acquisition mode and turn off auto exposure and gain
     device.gain(1)
     device.change_sensor_mode("Default")
     device.exposure_time(seconds=current_routine.int_times[0])
@@ -411,18 +463,31 @@ def main():
     device.node("GainAuto").SetCurrentEntry("Off")
     
     sleep(0.5)
+
     complete = False
 
-
-    
+    #Set up variables for checking the time and the number of consecutive errors
     consecutive_error_count = 0
+
+
     in_pipe_fd = os.open(PIPE_IN_FILE, os.O_RDONLY | os.O_NONBLOCK)
-    
-    
+      
     
     def write_to_pipe(message:str):
+        """
+        Writes a message to a named pipe for communication with the console interface.
+
+        Args:
+            message (str): The message to be written to the named pipe.
+
+        Raises:
+            OSError: If there is an error opening or closing the named pipe.
+            Exception: If there is an error passing the message to the named pipe.
+
+        Returns:
+            None
+        """
         try:
-            
             out_pipe_fd = os.open(PIPE_OUT_FILE, os.O_WRONLY | os.O_NONBLOCK)
             with os.fdopen(out_pipe_fd, "w") as out_pipe:
                 out_pipe.write(message)
@@ -433,15 +498,19 @@ def main():
         except Exception as e:
             print_and_log("Error passing message to named pipe")
             log_error(e)
-        
-    check_time_long = time()
-    check_time_short = time()
     
+    # set the time variables to the current time. The loop and run any code in intervals of long_check_length and short_check_length
+    check_time_long = time()
+    long_check_length = 300
+    check_time_short = time()
+    short_check_length = 1
+    
+    #Start the session thread to process the queue
     current_session.start_processing_queue()
 
-    
-    with os.fdopen(in_pipe_fd) as in_pipe:
-        while not complete:
+    #Main loop
+    with os.fdopen(in_pipe_fd) as in_pipe: #Open the named pipe for reading
+        while not complete: #Loop until the routine is complete or a stop signal is received
             try:
 
                 # Check for stop message
@@ -465,12 +534,12 @@ def main():
 
                 
                 if not current_routine.stop_signal:   
-                    if time() - check_time_long > 300:
+                    if time() - check_time_long > long_check_length:
                         print_and_log(f"Runtime: {str(timedelta(seconds=int(current_routine.run_time)))} Device Temp: {device.get_temperature()}°C  Depth: {get_depth():.2f}m Pressure Sensor Temp: {get_temp():.2f}°C")
                         check_time_long = time()
 
     
-                if time() - check_time_short > 1:
+                if time() - check_time_short > short_check_length:
                     check_time_short = time()
                     try:
                         message = f"Routine: {current_routine.name}\nSession: {current_session.name_no_spaces}\nRuntime: {str(timedelta(seconds=int(current_routine.run_time)))}\nImages Captured: {current_routine.image_count}\nImage Save Queue Size: {current_session.queue_length}\n"
@@ -505,7 +574,8 @@ def main():
     device.stop_acquisition()
     current_session.stop_processing_queue()
     print_and_log(f"Complete at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-    
+
+
 #Wrapper code for running this script.
 #Exits with exit code 0 if completed successfully, or 1 if there is an unhandled exception.
 if __name__ == '__main__':
