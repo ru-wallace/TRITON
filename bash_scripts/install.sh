@@ -36,8 +36,6 @@ if [ -f "$ENV_FILE" ]; then
     exit 0
 fi
 
-echo "No .env file found."
-echo "Creating .env file..."
 
 # Create .env file and add text
 DATA_DIR="$USER_HOME/TRITON_DATA"
@@ -73,12 +71,21 @@ if [ ! -d "$IDS_PEAK_DIR" ]; then
     echo "IDS Peak installation directory does not exist. Exiting..."
     exit 1
 fi
-
+echo "Creating data directory in $DATA_DIR..."
 mkdir -p "$DATA_DIR"
+mkdir -p "$DATA_DIR/routines"
+mkdir -p "$DATA_DIR/sessions"
+
+echo "Copying example routines to $DATA_DIR/routines..."
+cp -a "$BASE_DIR/example_routines/." "$DATA_DIR/routines/"
 
 echo "Increasing USB buffer size to 1000mb..."
-
 echo 1000 > /sys/module/usbcore/parameters/usbfs_memory_mb
+
+echo "Creating .env file at $ENV_FILE..."
+
+echo "Edit this file to change the data directory or IDS Peak installation directory, and to adjust location of named pipes."
+
 echo "DATA_DIRECTORY=\"$DATA_DIR\"" > "$ENV_FILE"
 echo "IDS_PEAK_DIR=\"$IDS_PEAK_DIR\"" >> "$ENV_FILE"
 echo "PIPE_IN_FILE=\"/tmp/TRITON_IN\"" >> "$ENV_FILE"
