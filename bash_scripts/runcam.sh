@@ -1,7 +1,6 @@
 #!/bin/bash
 
 
-USB_BUFFER_SIZE=$(cat /sys/module/usbcore/parameters/usbfs_memory_mb)
 
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
@@ -224,7 +223,8 @@ if [ -z "$SESSION_NAME" ]; then
 fi
 
 if [ "$USB_BUFFER_SIZE" -lt 1000 ]; then
-        echo "Warning: USB buffer size is less than 1000mb. Please run 'runcam -b' as root to increase the buffer size."
+        echo "Warning: USB buffer size is less than 1000mb. This is likely to cause errors during camera use."
+        echo "Please run 'runcam -b' as root to increase the buffer size."
 fi
 
 
