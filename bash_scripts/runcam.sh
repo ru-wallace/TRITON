@@ -38,13 +38,13 @@ while [[ $# -gt 0 ]]; do
             echo "  -b, --buffer [size]     Change the USB buffer size for this Linux device to [size]mb. If no size is specified, the buffer size will be set to 1000mb"
             echo "  -f, --focus             Test Focus of camera"
             echo "  -l, --log               View output log of a current active process"
-            echo "  -n [ --node ] arg       Select node by name (e.g. -n "DeviceModelName")."
-            echo "      --get                   Get node value and print it (e.g. -n "ExposureTime" --get)."
-            echo "      --set arg               Set node value (e.g. -n "ExposureTime" --set "14000")."
+            echo "  -n [ --node ] < --get | --set <value> > Get or set value of node by name (e.g. -n "ExposureTime" --set 1000)."              
             echo "  -q, --query             Check for active runcam process"
             echo "  -r, --routine FILE      Specify a routine file. The ./routines directory in the Aegir DATA_DIRECTORY  (specified in .env) will be looked at if full path not specified"
             echo "  -s, --session           Specify session name"
             echo "  -x, --stop              Send stop signal to a currently running process"
+
+            echo "  --run <python script file location>   ONLY USE IF YOU KNOW WHAT YOU ARE DOING: Run a python script with the environment set up as used by this tool. I.e GenTL Producer path is set.            "
 
             exit 0
             ;;
