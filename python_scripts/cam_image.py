@@ -207,7 +207,7 @@ class Cam_Image:
         #If the image is monochrome, the image pixels are just relative luminance scaled to 255 so can use this if we apply a mask.
         #If RGB, we use the IEC process as implemented in the luminance module to calculate relative luminance.        
         if self.format == "Mono8":
-            self._relative_luminance = np.divide(get_average_for_channels(self._image, mask=self._centre_mask, saturation_threshold=self.saturation_threshold), 255)[0]
+            self._relative_luminance = np.divide(get_pixel_averages_for_channels(self._image, mask=self._centre_mask, saturation_threshold=self.saturation_threshold), 255)[0]
             
         else:
             self._relative_luminance = luminance.calc_relative_luminance(self._image_array, mask=self._centre_mask, saturation_threshold=self.saturation_threshold)
@@ -227,30 +227,30 @@ class Cam_Image:
         if self._centre_mask is None:
             self._create_masks()
         #Calculate the fraction of pixels saturated in the active circle
-        self._inner_saturation_fraction = get_fraction_white_pixels(self._image, mask=self._centre_mask, saturation_threshold=self.saturation_threshold)
+        self._inner_saturation_fraction = get_fraction_saturated_pixels(self._image, mask=self._centre_mask, saturation_threshold=self.saturation_threshold)
         
         #Calculate the fraction of pixels saturated in the outer dark area
-        self._outer_saturation_fraction = get_fraction_white_pixels(self._image, mask=self._outer_mask, saturation_threshold=self.saturation_threshold)
+        self._outer_saturation_fraction = get_fraction_saturated_pixels(self._image, mask=self._outer_mask, saturation_threshold=self.saturation_threshold)
 
         #Calculate the fraction of pixels saturated in the corners
-        self._corner_saturation_fraction = get_fraction_white_pixels(self._image_array, mask=self._corner_mask, saturation_threshold=self.saturation_threshold)
+        self._corner_saturation_fraction = get_fraction_saturated_pixels(self._image_array, mask=self._corner_mask, saturation_threshold=self.saturation_threshold)
 
         
         self._concentric_saturation_fractions = {}
         for name, mask in list(self._concentric_masks.items()):
-            self._concentric_saturation_fractions[f"concentric_saturation_fraction_{name}"] = get_fraction_white_pixels(self._image_array, mask=mask, saturation_threshold=self.saturation_threshold)
+            self._concentric_saturation_fractions[f"concentric_saturation_fraction_{name}"] = get_fraction_saturated_pixels(self._image_array, mask=mask, saturation_threshold=self.saturation_threshold)
     
     def _get_pixel_averages(self) -> None:
         if self._centre_mask is None:
             self._create_masks()
         #Calculate the average pixel value for each channel  in the active circle
-        self._inner_avgs :tuple[float]= get_average_for_channels(self._image, mask=self._centre_mask)
+        self._inner_avgs :tuple[float]= get_pixel_averages_for_channels(self._image, mask=self._centre_mask)
         
         #Calculate the average pixel value for each channel in the outer dark area
-        self._outer_avgs:tuple[float] = get_average_for_channels(self._image, mask=self._outer_mask)
+        self._outer_avgs:tuple[float] = get_pixel_averages_for_channels(self._image, mask=self._outer_mask)
 
         #Calculate the average pixel value for each channel in the corners
-        self._corner_avgs: tuple[float]= get_average_for_channels(self._image_array, mask=self._corner_mask)
+        self._corner_avgs: tuple[float]= get_pixel_averages_for_channels(self._image_array, mask=self._corner_mask)
             
         #Getter and setter functions  
     
@@ -616,7 +616,7 @@ def create_metadata(image:Cam_Image, additional_items:dict=None) ->PngInfo:
         traceback.print_exception(e)     
         
         
-def get_fraction_white_pixels(image: Image.Image, mask: Image.Image = None, invert_mask:bool=False, saturation_threshold:int=255) -> float:
+def get_fraction_saturated_pixels(image: Image.Image, mask: Image.Image = None, invert_mask:bool=False, saturation_threshold:int=255) -> float:
   
     """Find the fraction of pixels which have a value greater than the threshold. Threshold is 250 by default.
 
@@ -650,14 +650,14 @@ def get_fraction_white_pixels(image: Image.Image, mask: Image.Image = None, inve
                 
         total_pixels = masked_array.size
         
-        number_white  = np.size(masked_array[masked_array > saturation_threshold])
+        number_saturated  = np.size(masked_array[masked_array > saturation_threshold])
 
-        fraction_white = number_white/total_pixels
+        fraction_saturated = number_saturated/total_pixels
         
 
         
         
-        return fraction_white
+        return fraction_saturated
     except IndexError as e:
         print("Error: ", file=sys.stderr)
         print(f"image_array shape: {image_array.shape}", file=sys.stderr)
@@ -668,7 +668,7 @@ def get_fraction_white_pixels(image: Image.Image, mask: Image.Image = None, inve
     except Exception as e:
         traceback.print_exception(e)
             
-def get_average_for_channels(image:Image.Image, mask:Image.Image=None, invert_mask:bool = False, saturation_threshold:int=255) ->tuple[float]:
+def get_pixel_averages_for_channels(image:Image.Image, mask:Image.Image=None, invert_mask:bool = False, saturation_threshold:int=255) ->tuple[float]:
     """Calculate the average pixel value for each channel. If a mask if provided, calculates for only active area.
 
     Args:
