@@ -814,9 +814,9 @@ def calculate_saturation_fraction(image:ids_peak_ipl.Image):
     image_array = image.get_numpy_2D()
     
     circle_mask = cam_image.create_circle_mask(image_array, centre=[1226, 1034], radius=472)
-    fraction_white = cam_image.get_fraction_white_pixels(image_array, mask=circle_mask, saturation_threshold=250)
+    fraction_saturated = cam_image.get_fraction_saturated_pixels(image_array, mask=circle_mask, saturation_threshold=250)
     
-    return fraction_white
+    return fraction_saturated
 
 def calculate_new_exposure(current_exposure_time, saturation_fraction:float, target_fraction:float=0.01):
     new_exposure_time = current_exposure_time
