@@ -454,7 +454,7 @@ def main():
     #Set the camera to continuous acquisition mode and turn off auto integration and gain
     device.gain(1)
     device.change_sensor_mode("Default")
-    device.integration_time(seconds=current_routine.int_times[0])
+    device.integration_time(seconds=current_routine.int_times_seconds[0])
     
     device.node("AcquisitionMode").SetCurrentEntry("Continuous")
     device.start_acquisition()
