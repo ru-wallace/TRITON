@@ -1,12 +1,12 @@
-# TRITON
+# AEGIR
 
-![A Blue Psi symbol on a white background](https://raw.githubusercontent.com/ru-wallace/resources/main/triton/triton_long_small.png)
 
-**T**ool for **R**adiance and **I**rradiance **T**esting **O**ptically in **N**ature
+
+**A**rtifically and **E**nvironmentally **G**enerated **I**rradiance and **R**adiance 
 
 ## Description
 
-This is a project in development containing tools which can be used for controlling IDS Cameras, and processing images captured.
+This is a project in development which can be used for controlling IDS USB3Vision Cameras, and processing images captured.
 The tools will only work on Linux based operating systems. The system is designed to be used with a Raspberry Pi 4.
 
 ## Requirements
@@ -67,11 +67,12 @@ A custom algorithm for adjusting integration time automatically is used, though 
 
 ### Sessions
 
-A session (for want of a better name) is a set of images stored together in a single directory. It is intended that one session be used for one related set of measurements (e.g one run of calibration images, or one drop of the device from a ship) A session has the following attributes:
+A session is a set of images stored together in a single directory. It is intended that one session be used for one related set of measurements (e.g one run of calibration images, or one drop of the device from a ship). 
+
+A session has the following attributes:
 
 - Name
 - Start time
-- Co-ords (optional)
 - Images
 
 Each session is stored in the ```[data directory]/sessions/``` subdirectory in a directory with the same name as the session.
@@ -90,17 +91,15 @@ The directory uses the following structure:
 
 -```images/```: A subdirectory containing the image files as PNGs. Each image file has its metadata embedded in the file, which can be accessed in various ways, including using the Python Image Library (PIL) Image.metadata() function. As a last resort, opening the image using notepad or a similar text editor will also show the data in slightly mangled plain text, along with the binary pixel data of the image.
 
-- ```session.json```: Every session has this file. it contains a list of each image captured in the session, and metadata including the time, number, camera temperature, integration time, gain, and the raw and processed measurements calculated for that image (see [Image Processing](#image-processing)).
+- ```session.json```: A JSON formatted list of each image captured in the session, and metadata including the time, number, camera temperature, integration time, gain, and the raw and processed measurements calculated for that image (see [Image Processing](#image-processing)).
 
--```images.csv```: Every time a routine is run which adds images to the session , a new run csv file is added which contains all the white balance and pixel averages of each photo as well as the exposure time and device temperatures and all the metadata.
+-```images.csv```: Every time a routine is run which adds images to the session , a new run csv file is added which contains all metadata for each image.
 
-- ```output.log```: If any images in the session are captured using an auto-capture routine, this file will be present. It contains the output of the auto_capture.py python script as it executes the routine. This is useful for debugging if there is an issue with the routine running.
-
-
+- ```output.log```: This file contains the output of the auto_capture.py python script as it executes the routine. This is useful for debugging if there is an issue with the routine running.
 
 ### Image Processing
 
-The images are processed using the cam_image script. To measure various attributes, the following regions are used:
+The images are processed using the cam_image.py script. To measure various attributes, the following regions are used:
 
 ![Regions Diagram](https://raw.githubusercontent.com/ru-wallace/resources/main/triton/regions.png)
 
@@ -110,13 +109,15 @@ The images are processed using the cam_image script. To measure various attribut
 - **Corner Regions**: A quarter-circle area in each corner used to measure the furthest extremes of the sensor, away from the active area. For each measurement a single value is calculated averaging over each corner.
   The outer region also includes these regions.
 
-#### White Fraction
+The program also calculates saturation fractions for concentric rings expanding out from the inner region.
+
+#### Saturation Fraction
 
 For each region, the fraction of pixels which are saturated is calculated. This is quantified as the number of pixels with a value greater than 250 (out of 255) divided by the total number of pixels in the region. This quantity is referred to as the "*white fraction*" and ranges from 0 (no saturated pixels) to 1 (all pixels saturated).
 
 #### Pixel Averages
 
-For each region, an average pixel value for each colour channel is then calculated. This is done prior to demosaicing so that the raw unaltered sensor values can be used.
+For each region, an average pixel value for each colour channel is calculated.
 
 #### Luminance
 
@@ -129,21 +130,4 @@ For the inner active region the white fraction is used to drive the auto-adjustm
 
 The integration time is increased or decreased proportionally to get closer to the target fraction, and the process repeated until within 0.005 of the target. For short integration times below 1/10th of a second this is trivial, but can be time consuming for longer captures, especially into the tens of seconds.
 
-
-
-
-
-
 ## Usage
-
-There are two main tools in the project - a menu-based console interface, and a tool to run an auto-capture routine with a set of pre-defined instructions.
-
-### Console Interface
-
-This is used for live control of a camera, as well as viewing details of existing images that have been captured.
-
-Launch the console interface using the command:
-
-        runcam -c
-
-This will open 

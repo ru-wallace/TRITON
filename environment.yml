@@ -1,4 +1,4 @@
-name: triton
+name: aegir
 channels:
   - conda-forge
 dependencies:
