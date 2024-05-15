@@ -57,7 +57,7 @@ if [ "$ACCEPT_DEFAULT_DIR" == "n" ]; then
         
         fi
     else
-        DATA_DIR="$DATA_DIR/TRITON_DATA"
+        DATA_DIR="$DATA_DIR/AEGIR_DATA"
     fi
 elif [ ! "$ACCEPT_DEFAULT_DIR" == "y" ]; then
     echo "Invalid input: \"$ACCEPT_DEFAULT_DIR\". Exiting..."
