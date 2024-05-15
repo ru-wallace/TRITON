@@ -48,7 +48,7 @@ class Resources:
 
 class Cam_Image:
     
-    def __init__(self, image:np.ndarray, timestamp:datetime, integration_time:int, auto:bool, gain:float, aperture:float, format:str, number:int=None, depth:float=None, pressure:float=None, cam_temp:float=None, environment_temp:float=None,  saturation_threshold:int=250, debayer_method:str = "average_greens", target_saturation_fraction:float=0.01, target_saturation_margin:float=0.005) -> None:
+    def __init__(self, image:np.ndarray, timestamp:datetime, integration_time_us:int, auto:bool, gain:float, aperture:float, format:str, number:int=None, depth:float=None, pressure:float=None, cam_temp:float=None, environment_temp:float=None,  saturation_threshold:int=250, debayer_method:str = "average_greens", target_saturation_fraction:float=0.01, target_saturation_margin:float=0.005) -> None:
         """Create Cam_Image object which contains an Image and a combination of pre-set and calculated metadata.
 
         Args:
@@ -113,7 +113,7 @@ class Cam_Image:
 
             self._timestamp : datetime = timestamp
 
-            self._integration_time : int = integration_time
+            self._integration_time_us : int = integration_time_us
             self._aperture : float = aperture
             self._auto : bool = auto
             
@@ -202,7 +202,7 @@ class Cam_Image:
             self._create_masks()
         
         #Change integration time from microseconds to seconds
-        integration_sec = self.integration_time/10e6
+        integration_sec = self.integration_time_us/10e6
 
         #If the image is monochrome, the image pixels are just relative luminance scaled to 255 so can use this if we apply a mask.
         #If RGB, we use the IEC process as implemented in the luminance module to calculate relative luminance.        
@@ -286,8 +286,8 @@ class Cam_Image:
         return self._number
     
     @property
-    def integration_time(self) -> int:
-        return self._integration_time
+    def integration_time_us(self) -> int:
+        return self._integration_time_us
     
     @property
     def aperture(self) -> float:
@@ -382,8 +382,8 @@ class Cam_Image:
         
         info = {"number" : self.number,
                 "time" : self.time_string('%Y-%m-%d %H:%M:%S.%f')[:-3],
-                "integration_microseconds" : self.integration_time,
-                "integration_seconds": self.integration_time/1000000,
+                "integration_microseconds" : self.integration_time_us,
+                "integration_seconds": self.integration_time_us/1000000,
                 "auto": self.auto,
                 "gain_dB" : self.gain,
                 "depth_m" : self.depth,
@@ -500,35 +500,25 @@ def debayer_average_greens_method(image: np.ndarray, pattern:str) -> np.ndarray:
         np.ndarray: The debayered RGB image array.
     """
     
-    
-    red_mask, green_mask, blue_mask = colour_demosaicing.masks_CFA_Bayer(image.shape, pattern=pattern)
-    
+    red_mask, green_mask_1, blue_mask = colour_demosaicing.masks_CFA_Bayer(image.shape, pattern=pattern)
+    green_mask_2 = green_mask_1.copy()
+    green_mask_1[0::2] = 0
+    green_mask_2[1::2] = 0
+
     ncols = sum(red_mask[0])
     
-    red = image[red_mask].reshape((ncols, -1))
-    green1 = image[green_mask][::2].reshape((ncols, -1))
-    green2 = image[green_mask][1::2].reshape((ncols, -1))
+    red = image[red_mask].reshape((-1, ncols))
+    green1 = image[green_mask_1].reshape((-1, ncols))
+    green2 = image[green_mask_2].reshape((-1, ncols))
+    blue = image[blue_mask].reshape((-1, ncols))
     
-    green_avg = np.mean([green1, green2], axis=0)
-    
-    
-    blue = image[blue_mask].reshape((ncols, -1))
-    
-    
-    
-    # Split the bayer array into different color channels
-    red = image[0::2, 0::2]
-    green1 = image[1::2, 0::2]
-    green2 = image[0::2, 1::2]
-    blue = image[1::2, 1::2]
-    
-    # Calculate the average of the two green values
-    green_avg = (green1 + green2) / 2
+    green_avg = np.mean(np.array([green1, green2]), axis=0)
     
     # Create the RGB image array
     rgb_array = np.dstack((red, green_avg, blue))
     
     return rgb_array
+
         
 def debayer(image:np.ndarray, method="average_greens", pattern="RGGB")-> np.ndarray:
     """## Debayer or Demosaic an Image.
