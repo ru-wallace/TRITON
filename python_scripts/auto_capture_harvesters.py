@@ -262,7 +262,7 @@ def main():
             while not capture_successful: # Keep trying to capture an image until it is successful
                 print_and_log("Capturing...")
                 image = device.capture_image(return_type=device_interface.CAM_IMAGE, target_integration_time_us=target_integration_time_us)
-                if image.image is None: #Sometimes the camera fails to capture an image. If this happens, retry.
+                if image is None: #Sometimes the camera fails to capture an image. If this happens, retry.
                     print_and_log("Capture failed - retrying...")
                     continue
                 print_and_log("Capture Complete")
@@ -455,11 +455,9 @@ def main():
     device.change_sensor_mode(device_interface.DEFAULT)
     device.integration_time(time=current_routine.int_times_seconds[0], time_unit=device_interface.SECONDS)
     
-    device.node("AcquisitionMode").SetCurrentEntry("Continuous")
-    device.start_acquisition()
+    device.start_acquisition(mode=device_interface.CONTINUOUS)
     
-    device.node("ExposureAuto").SetCurrentEntry("Off")
-    device.node("GainAuto").SetCurrentEntry("Off")
+    device.set_to_manual()
     
     sleep(0.5)
 

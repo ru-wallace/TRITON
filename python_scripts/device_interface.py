@@ -91,21 +91,13 @@ class Camera:
     def __init__(self) -> None:
         
         self.harvester = Harvester() 
-        self.connected = False
         
         # Add producer file path
         self.harvester.add_file(PRODUCER_PATH)
-        self.harvester.update()
+
 
         self.connect()
-        # Create an image acquirer with auto chunk data update enabled
-        self.acquisition_params = ParameterSet()
-        self.acquisition_params.add(ParameterKey.ENABLE_AUTO_CHUNK_DATA_UPDATE, True)
-        self.device:ImageAcquirer = self.harvester.create(config=self.acquisition_params)
-        
-        self.nodemap:NodeMap = self.device.remote_device.node_map
-        self.data_stream: genicam.gentl.DataStream = self.device.data_streams[0]
-        self.ds_nodemap: NodeMap= self.data_stream.node_map
+
 
         self.start_time = datetime.now()
 
@@ -116,15 +108,13 @@ class Camera:
         else:
             self.nodemap.PixelFormat.set_value(MONO8)
         
-        
-        
         # Activate chunk mode and enable pixelformat and exposure time chunks so the device passes this data along with the image
         chunks = ["Timestamp", "ExposureTime", "Width", "Height", "PixelFormat", "Gain"]
         self.activate_chunks(chunks)
 
     
     def activate_chunks(self, chunks:list[str]):  
-        self.nodemap.ChunkModeActive.set_value("False")
+        self.nodemap.ChunkModeActive.set_value("True")
         for entry in self.nodemap.ChunkSelector._get_symbolics():
             if entry in chunks:
                 print(f"Setting {entry} to True")
@@ -132,12 +122,12 @@ class Camera:
                 self.nodemap.ChunkEnable.set_value("True")
         self.nodemap.ChunkModeActive.set_value("True")
         
+        
     def start_acquisition(self, mode:str="Continuous"):
         if self.device.is_acquiring():
             return
-        self.device._enable_auto_chunk_data_update = True
-        self.device.update_chunk_automatically = True
-        self.device.AcquisitionMode.set_value(mode)
+
+        self.nodemap.AcquisitionMode.set_value(mode)
         self.device.start()
 
     @property
@@ -156,12 +146,14 @@ class Camera:
             
             correct_integration_attempts = 0
             fetch_attempts = 0
+            integration_time_us = None
             while buffer is None:
                 
                 try:
-                    buffer:Buffer = self.device.fetch(300)
-
+                    buffer:Buffer = self.device.fetch()
+                    buffer.update_chunk_data()
                     integration_time_us = self.nodemap.ChunkExposureTime.value
+                    buffer._attributes
                     if target_integration_time_us is not None:
                         if abs(integration_time_us - target_integration_time_us) > target_integration_time_us/10:
                             buffer.queue()
@@ -186,8 +178,10 @@ class Camera:
             
             format = component.data_format
             
+            integration_time_us =  self.nodemap.ChunkExposureTime.value
+            
             buffer.queue()
-             
+            
             clock_timestamp = buffer.timestamp_ns/(10**9)
                 
             timestamp = self.start_time + timedelta(seconds = clock_timestamp)
@@ -202,7 +196,7 @@ class Camera:
                              aperture=1,
                              cam_temp=temperature)
         except Exception as e:
-            traceback.print_exc(e)
+            traceback.print_exception(e)
             return None    
     
     
@@ -257,8 +251,7 @@ class Camera:
             
             time_us = convert_time(time, time_unit, MICROSECONDS)
 
-            max_time = self.nodemap.ExposureTime.max
-            min_time = self.nodemap.ExposureTime.min
+            min_time, max_time = self._get_integration_min_max(time_unit=MICROSECONDS)   
             sensor_mode = self.nodemap.SensorOperationMode.value
             
             if time_us < min_time:
@@ -271,8 +264,7 @@ class Camera:
                     self.stop_acquisition()
                     self.change_sensor_mode(LONG_EXPOSURE)
             
-            max_time = self.nodemap.ExposureTime.max
-            min_time = self.nodemap.ExposureTime.min      
+            min_time, max_time = self._get_integration_min_max(time_unit=MICROSECONDS)   
             
             time_us = max(min_time, min(max_time, time_us))
             
@@ -403,7 +395,7 @@ class Camera:
                 return
             
         except Exception as e:
-            traceback.print_exc(e)
+            traceback.print_exception(e)
         
         finally:
             self.set_pixel_format(pixel_format)

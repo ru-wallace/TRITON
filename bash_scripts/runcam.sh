@@ -21,6 +21,8 @@ export GENICAM_GENTL64_PATH="$IDS_PEAK_DIR/lib/ids/cti"
 export GENICAM_GENTL32_PATH="$GENICAM_GENTL64_PATH"
 export PATH="$IDS_PEAK_DIR/bin:$PATH"
 
+USB_MEMORY_FILE="/sys/module/usbcore/parameters/usbfs_memory_mb"
+
 ROUTINE_FILE=""
 SESSION_NAME=""
 
@@ -59,7 +61,7 @@ while [[ $# -gt 0 ]]; do
             if [ "$EUID" -eq 0 ]; then
                 if [[ "$USB_BUFFER_SIZE" =~ ^[0-9]+$ && "$USB_BUFFER_SIZE" -lt 10000 ]]; then
                     echo "Increasing USB buffer size to 1000mb..."
-                    echo "$USB_BUFFER_SIZE" > /sys/module/usbcore/parameters/usbfs_memory_mb
+                    echo "$USB_BUFFER_SIZE" > "$USB_MEMORY_FILE"
                 else
                     echo "Error: Invalid buffer size. Buffer size must be an integer below 10000." >&2
                     exit 1
@@ -79,6 +81,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --harvesters)
             HARVESTERS_MODE=1
+            shift
             ;;
         -l|--log)
             echo -n "Checking for process..."
@@ -228,6 +231,8 @@ if [ -z "$SESSION_NAME" ]; then
     echo "Error: Required argument -s/--session is missing. Use runcam --help for help." >&2
     exit 1
 fi
+
+USB_BUFFER_SIZE="$(cat "$USB_MEMORY_FILE")"
 
 if [ "$USB_BUFFER_SIZE" -lt 1000 ]; then
         echo "Warning: USB buffer size is less than 1000mb. This is likely to cause errors during camera use."
