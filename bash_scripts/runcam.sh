@@ -43,7 +43,7 @@ while [[ $# -gt 0 ]]; do
             echo "  -r, --routine FILE      Specify a routine file. The ./routines directory in the Aegir DATA_DIRECTORY  (specified in .env) will be looked at if full path not specified"
             echo "  -s, --session           Specify session name"
             echo "  -x, --stop              Send stop signal to a currently running process"
-
+            echo "  --harvesters            Run autocam in harvesters mode"
             echo "  --run <python script file location>   ONLY USE IF YOU KNOW WHAT YOU ARE DOING: Run a python script with the environment set up as used by this tool. I.e GenTL Producer path is set.            "
 
             exit 0
@@ -76,6 +76,9 @@ while [[ $# -gt 0 ]]; do
         -f|--focus)
             python "$BASE_DIR/python_scripts/get_sharpness.py"
             exit 0
+            ;;
+        --harvesters)
+            HARVESTERS_MODE=1
             ;;
         -l|--log)
             echo -n "Checking for process..."
@@ -264,8 +267,13 @@ cd "$SCRIPT_DIR/.."  &> /dev/null
 
 # Launch Python script with named arguments
 
+if [ -n "$HARVESTERS_MODE" ]; then
+    PYTHON_SCRIPT="$BASE_DIR/python_scripts/auto_capture_harvesters.py"
+else
+    PYTHON_SCRIPT="$BASE_DIR/python_scripts/auto_capture.py"
+fi
 
-python "$BASE_DIR/python_scripts/auto_capture.py" --routine "$ROUTINE_FILE" --session "$SESSION_NAME"  >/dev/null &
+python "$PYTHON_SCRIPT" --routine "$ROUTINE_FILE" --session "$SESSION_NAME"  >/dev/null &
 
 disown -h $!
 
