@@ -31,78 +31,53 @@ conda activate ids_device
 # Parse options
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        -h|--help)
+            echo "Usage: $0 [OPTIONS]"
+            echo "Options:"
+            echo "  -h, --help              Show this help message"
+            echo "  -b, --buffer [size]     Change the USB buffer size for this Linux device to [size]mb. If no size is specified, the buffer size will be set to 1000mb"
+            echo "  -f, --focus             Test Focus of camera"
+            echo "  -l, --log               View output log of a current active process"
+            echo "  -n [ --node ] arg       Select node by name (e.g. -n "DeviceModelName")."
+            echo "      --get                   Get node value and print it (e.g. -n "ExposureTime" --get)."
+            echo "      --set arg               Set node value (e.g. -n "ExposureTime" --set "14000")."
+            echo "  -q, --query             Check for active runcam process"
+            echo "  -r, --routine FILE      Specify a routine file. The ./routines directory in the Aegir DATA_DIRECTORY  (specified in .env) will be looked at if full path not specified"
+            echo "  -s, --session           Specify session name"
+            echo "  -x, --stop              Send stop signal to a currently running process"
+
+            exit 0
+            ;;
         -b|--buffer)
+            if [ -n "$2" ]; then
+                USB_BUFFER_SIZE="$2"
+                shift 2
+            else
+                USB_BUFFER_SIZE=1000
+                shift
+            fi
             if [ "$EUID" -eq 0 ]; then
-                echo "Increasing USB buffer size to 1000mb..."
-                echo 1000 > /sys/module/usbcore/parameters/usbfs_memory_mb
+                if [[ "$USB_BUFFER_SIZE" =~ ^[0-9]+$ && "$USB_BUFFER_SIZE" -lt 10000 ]]; then
+                    echo "Increasing USB buffer size to 1000mb..."
+                    echo "$USB_BUFFER_SIZE" > /sys/module/usbcore/parameters/usbfs_memory_mb
+                else
+                    echo "Error: Invalid buffer size. Buffer size must be an integer below 10000." >&2
+                    exit 1
+                fi
+
+
+
             else
                 echo "Error: Must be root to increase USB buffer size"
                 echo "Exiting..."
                 exit 1
             fi
             ;;
-        -c|--console)
-            python "$BASE_DIR/python_scripts/console_interface.py"
-            exit 0
-            ;;
         -f|--focus)
             python "$BASE_DIR/python_scripts/get_sharpness.py"
             exit 0
             ;;
-        
-        -n|--node)
-            if [ -n "$2" ]; then
-                NODE="$2"
-                shift 2
-            else
-                echo "Error: Argument for $1 is missing" >&2
-                exit 1
-            fi
-            ;;
-
-        --get)
-            if [ -n "$NODE" ]; then
-                echo "$(ids_devicecommand -n $NODE --get)"
-                exit 0
-            else
-                echo "Error: No Node Name. Use 'runcam --node [node name] --get | --set [value]"
-                exit 1
-            fi
-            ;;
-        --set)
-            if [ -n "$NODE" ]; then
-                if [ -n "$2" ]; then
-                    NODE="$2"
-                    shift 2
-                else
-                    echo "Error: Argument for $1 is missing" >&2
-                    exit 1
-            fi
-                echo "$(ids_devicecommand -n $NODE --set $VALUE)"
-                exit 0
-            else
-                echo "Error: No Node Name. Use 'runcam --node [node name] --get | --set [value]'"
-                exit 1
-            fi
-            ;;
-
-        -q|--query)
-            echo -n "Checking for process..."
-            if [ -p "$PIPE_OUT_FILE" ]; then
-                RUNCAM_STATUS=$(timeout 3 cat "$PIPE_OUT_FILE")
-                echo -en "\e[K"
-                if [ -z "${RUNCAM_STATUS}" ]; then
-                    echo -e "\rNo Runcam processes detected"
-                else
-                    echo -e "\rStatus: $RUNCAM_STATUS"
-                fi
-            else
-                echo -e "\rNo Runcam processes detected"
-            fi
-            exit 0
-            ;;
-        
-            -l|--log)
+        -l|--log)
             echo -n "Checking for process..."
             if [ -p "$PIPE_OUT_FILE" ]; then
                 RUNCAM_STATUS=$(timeout 3 cat "$PIPE_OUT_FILE")
@@ -121,65 +96,58 @@ while [[ $# -gt 0 ]]; do
             fi
             exit 0
             ;;
-        -x|--stop)
-            echo -n "Checking for process..."
-            if ! [ -p "$PIPE_OUT_FILE" ]; then
-                echo -e "\rNo Runcam processes detected"
-                exit 0
-            fi
-            RUNCAM_STATUS=$(timeout 3 cat "$PIPE_OUT_FILE")
-            if [ -z "${RUNCAM_STATUS}" ]; then
-                echo -e "\rNo Runcam processes detected"
-                exit 0
-            fi
-            echo -e "\rProcess found:\e[K"
-            echo "$RUNCAM_STATUS"
-            echo "Stopping Process..."
-            echo -n "STOP" > "$PIPE_IN_FILE" &
-            sleep .5
-            STOP_STATUS=$(timeout 3 cat "$PIPE_OUT_FILE")
-            
-            echo "Stopping: $STOP_STATUS"
-            if [ "$STOP_STATUS" = "STOPPING" ]; then
-                echo "Process Successfully Stopped"
-            else
-                echo "Failed to stop process"
-                exit 0
-            fi
-
-            
-            
-            
-            exit 0
-            ;;
-        
-        -h|--help)
-            echo "Usage: $0 [OPTIONS]"
-            echo "Options:"
-            echo "  -h, --help              Show this help message"
-            echo "  -r, --routine FILE      Specify a routine file. The ./routines directory in the Aegir DATA_DIRECTORY  (specified in .env) will be looked at if full path not specified"
-            echo "  -s, --session           Specify session name"
-            echo "  -f, --focus             Test Focus of camera"
-            echo "  -c, --console           Open Console Interface for Camera"
-            echo "  -q, --query             Check for active runcam process"
-            echo "  -l, --log               View output log of a current active process"
-            echo "  -n [ --node ] arg       Select node by name (e.g. -n "DeviceModelName")."
-            echo "      --get                   Get node value and print it (e.g. -n "ExposureTime" --get)."
-            echo "      --set arg               Set node value (e.g. -n "ExposureTime" --set "14000")."
-            exit 0
-            ;;
-        -r|--routine)
-             if [ -n "$2" ]; then
-                ROUTINE_FILE="$2"
+        -n|--node)
+            if [ -n "$2" ]; then
+                NODE="$2"
                 shift 2
             else
                 echo "Error: Argument for $1 is missing" >&2
                 exit 1
             fi
             ;;
-        -s|--session)
+        --get)
+            if [ -n "$NODE" ]; then
+                echo "$(ids_devicecommand -n $NODE --get)"
+                exit 0
+            else
+                echo "Error: No Node Name. Use 'runcam --node [node name] --get | --set [value]"
+                exit 1
+            fi
+            ;;  
+        --set)
+            if [ -n "$NODE" ]; then
+                if [ -n "$2" ]; then
+                    NODE="$2"
+                    shift 2
+                else
+                    echo "Error: Argument for $1 is missing" >&2
+                    exit 1
+            fi
+                echo "$(ids_devicecommand -n $NODE --set $VALUE)"
+                exit 0
+            else
+                echo "Error: No Node Name. Use 'runcam --node [node name] --get | --set [value]'"
+                exit 1
+            fi
+            ;;                      
+        -q|--query)
+            echo -n "Checking for process..."
+            if [ -p "$PIPE_OUT_FILE" ]; then
+                RUNCAM_STATUS=$(timeout 3 cat "$PIPE_OUT_FILE")
+                echo -en "\e[K"
+                if [ -z "${RUNCAM_STATUS}" ]; then
+                    echo -e "\rNo Runcam processes detected"
+                else
+                    echo -e "\rStatus: $RUNCAM_STATUS"
+                fi
+            else
+                echo -e "\rNo Runcam processes detected"
+            fi
+            exit 0
+            ;;
+        -r|--routine)
              if [ -n "$2" ]; then
-                SESSION_NAME="$2"
+                ROUTINE_FILE="$2"
                 shift 2
             else
                 echo "Error: Argument for $1 is missing" >&2
@@ -197,6 +165,42 @@ while [[ $# -gt 0 ]]; do
                 echo "Error: Argument for $1 is missing" >&2
                 exit 1
             fi
+            ;;
+        -s|--session)
+             if [ -n "$2" ]; then
+                SESSION_NAME="$2"
+                shift 2
+            else
+                echo "Error: Argument for $1 is missing" >&2
+                exit 1
+            fi
+            ;;
+        -x|--stop)
+            echo -n "Checking for process..."
+            if ! [ -p "$PIPE_OUT_FILE" ]; then
+                echo -e "\rNo Runcam processes detected"
+                exit 0
+            fi
+            RUNCAM_STATUS=$(timeout 3 cat "$PIPE_OUT_FILE")
+            if [ -z "${RUNCAM_STATUS}" ]; then
+                echo -e "\rNo Runcam processes detected"
+                exit 0
+            fi
+            echo -e "\rProcess found:\e[K"
+            echo "$RUNCAM_STATUS"
+            echo "Stopping Process..."
+            echo -n "STOP" > "$PIPE_IN_FILE" &
+            sleep .5
+            STOP_STATUS=$(timeout 3 cat "$PIPE_OUT_FILE")
+
+            echo "Stopping: $STOP_STATUS"
+            if [ "$STOP_STATUS" = "STOPPING" ]; then
+                echo "Process Successfully Stopped"
+            else
+                echo "Failed to stop process"
+                exit 0
+            fi
+            exit 0
             ;;
         *)
             echo "Error: Unknown option $1 - Use runcam -h or --help for commands" >&2
