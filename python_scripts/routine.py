@@ -72,13 +72,13 @@ class Routine:
         settings = np.tile(settings, self.repeat)
 
         
-        self.int_times:np.ndarray = settings[0,:self.number_limit]
+        self.int_times_seconds:np.ndarray = settings[0,:self.number_limit]
         self.gains:np.ndarray = settings[1,:self.number_limit]
         
         #Create queue which holds the settings for each photo.
         self.params_queue : queue.Queue = queue.Queue()
-        for param_set in range(self.int_times.shape[0]):
-            self.params_queue.put({'integration_time': self.int_times[param_set],
+        for param_set in range(self.int_times_seconds.shape[0]):
+            self.params_queue.put({'integration_time': self.int_times_seconds[param_set],
                                    'gain': self.gains[param_set]})
         
         # Add a None value to the end of the queue. When this is reached, the image acquisition thread will stop
@@ -95,7 +95,7 @@ class Routine:
         
         capture_start = self.interval_mode == CAPTURE_START
         capture_end = self.interval_mode == CAPTURE_END
-        self.expected_time = self.int_times.size +sum(self.int_times) + self.repeat*self.repeat_interval_time_secs + capture_start*self.interval_secs*self.int_times[self.int_times > self.interval_secs -1].size + capture_end*self.interval_secs*self.int_times.size
+        self.expected_time = self.int_times_seconds.size +sum(self.int_times_seconds) + self.repeat*self.repeat_interval_time_secs + capture_start*self.interval_secs*self.int_times_seconds[self.int_times_seconds > self.interval_secs -1].size + capture_end*self.interval_secs*self.int_times_seconds.size
         self.expected_time = int(min(self.time_limit_secs, self.expected_time))
         
         
@@ -124,9 +124,9 @@ class Routine:
         string += f"\nIteration Length: {self.iteration_length}"
         string += f"\nRepeat: {self.repeat}"
         string += f"\nRepeat Interval: {self.repeat_interval_time_secs}s"
-        string += f"\nIntegration_times (s): { (str(self.int_times[:7]).strip(']') + '...]') if len(str(self.int_times)) > 10 else str(self.int_times)}"
+        string += f"\nIntegration_times (s): { (str(self.int_times_seconds[:7]).strip(']') + '...]') if len(str(self.int_times_seconds)) > 10 else str(self.int_times_seconds)}"
         string += f"\nGain settings: { (str(self.gains[:7]).strip(']') + '...]') if len(str(self.gains)) > 10 else str(self.gains)}"
-        string += f"\nPlanned Image total: {self.int_times.size}"
+        string += f"\nPlanned Image total: {self.int_times_seconds.size}"
         string += f"\nTime Estimate: {datetime.fromtimestamp(time.time() + self.expected_time).strftime('%Y-%m-%d %H:%M:%S')} ({str(timedelta(seconds=self.expected_time))})"
         string += f"\nTick length: {self.tick_length}"
         return string
@@ -247,7 +247,7 @@ class Routine:
                         self.stop_signal = True
                     else:
                         self.complete = True
-                    tick_done(self.complete, f"Reached Number Limit of {self.number_limit} (Image count: {self.image_count}, Number of integration_times: {self.int_times.size}) (First trap)")
+                    tick_done(self.complete, f"Reached Number Limit of {self.number_limit} (Image count: {self.image_count}, Number of integration_times: {self.int_times_seconds.size}) (First trap)")
                     return self.complete
             
             
@@ -258,12 +258,12 @@ class Routine:
                     return self.complete
             
             
-            if self.image_count >= self.int_times.size:
+            if self.image_count >= self.int_times_seconds.size:
                 if not self.capturing_images:
                     self.complete = True
                 else:
                     self.stop_signal = True
-                tick_done(self.complete, f"Reached end of routine ({self.image_count}/{self.int_times.size} images)")
+                tick_done(self.complete, f"Reached end of routine ({self.image_count}/{self.int_times_seconds.size} images)")
                 return self.complete
             
             if self.now > self.next_capture and not self.stop_signal:
@@ -273,7 +273,7 @@ class Routine:
                 self.capture_queue.put(next_param_set)
                 if next_param_set is None:
                     self.complete = True
-                    tick_done(self.complete, f"Reached end of routine ({self.image_count}/{self.int_times.size} images)")
+                    tick_done(self.complete, f"Reached end of routine ({self.image_count}/{self.int_times_seconds.size} images)")
                     
                 self.params_queue.task_done()
                 return self.complete
