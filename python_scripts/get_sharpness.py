@@ -21,7 +21,7 @@ class Sharpness_Tool:
         self.device.load_settings("Default")
         self.device.node("PixelFormat").SetCurrentEntry("Mono8")
         self.device.node("AcquisitionMode").SetCurrentEntry("Continuous")
-        self.exposure_time = self.device.exposure_time(microseconds=150)
+        self.exposure_time = self.device.integration_time(microseconds=150)
         self.device.node("ExposureAuto").SetCurrentEntry("Continuous")
         self.device.start_acquisition()
         self.last_error = None

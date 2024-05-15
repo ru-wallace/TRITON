@@ -213,16 +213,16 @@ def main():
     
     #Function to capture an image from the camera
     #This function is passed to the routine object and is called when the routine wants to capture an image
-    #It takes an integration time in seconds, a gain value and a boolean for auto exposure
-    #If the integration time is 0 or None, the function will use auto exposure
+    #It takes an integration time in seconds, a gain value and a boolean for auto integration
+    #If the integration time is 0 or None, the function will use auto integration
     def capture_image(integration_time_secs: float = None, gain: float = None, auto: bool = False):
         """
-        Capture an image using the specified integration time, gain, and auto-exposure settings.
+        Capture an image using the specified integration time, gain, and auto-integration settings.
 
         Args:
             integration_time_secs (float, optional): Integration time in seconds. If set to 0 or None, auto-adjust integration time mode will be used. Defaults to None.
             gain (float, optional): Device gain value. If provided, the device gain will be changed to this value. Defaults to None.
-            auto (bool, optional): Flag indicating whether to use auto-exposure mode. If True, auto-exposure mode will be used regardless of the integration time value. Defaults to False.
+            auto (bool, optional): Flag indicating whether to use auto-integration mode. If True, auto-integration mode will be used regardless of the integration time value. Defaults to False.
 
         Raises:
             Exception: If an error occurs while capturing the image.
@@ -234,7 +234,7 @@ def main():
             nonlocal current_session
             nonlocal current_routine
 
-            exposure_time = device.exposure_time() / 1e6
+            integration_time = device.integration_time() / 1e6
             image_string = f"Capturing Image #{current_session.image_count + current_session.queue_length}(Routine image#{current_routine.image_count}) - Integration Time : {integration_time_secs}s"
             if auto:
                 image_string += "- Auto Exposure"
@@ -248,8 +248,8 @@ def main():
             if integration_time_secs == 0 or integration_time_secs is None or auto:
                 auto = True
             else:
-                exposure_time = device.exposure_time(seconds=integration_time_secs) / 1e6
-                print_and_log(f"Set Exposure Time to {exposure_time}s")
+                integration_time = device.integration_time(seconds=integration_time_secs) / 1e6
+                print_and_log(f"Set Exposure Time to {integration_time}s")
 
             capture_successful = False
             image = None
@@ -257,17 +257,17 @@ def main():
 
             # The device may have old images in the buffer with different integration times, 
             #so we need to set the desired integration time to the new value and it will flush the buffer until an image is captured with the new integration time.
-            desired_exposure_time = integration_time_secs * 1e6 if not auto else None 
+            desired_integration_time_us = integration_time_secs * 1e6 if not auto else None 
             while not capture_successful: # Keep trying to capture an image until it is successful
                 print_and_log("Capturing...")
 
                 image: Cam_Image = device.capture_frame(return_type=ids_interface.Resources.CAM_IMAGE,
-                                                        desired_exposure_time_microseconds=desired_exposure_time) # Capture an image.
+                                                        desired_integration_time_microseconds=desired_integration_time_us) # Capture an image.
                 if image.image is None: #Sometimes the camera fails to capture an image. If this happens, retry.
                     print_and_log("Capture failed - retrying...")
                     continue
                 print_and_log("Capture Complete")
-                # Add the pressure, depth, and temperature to the image object and set whether it was an auto exposure capture.
+                # Add the pressure, depth, and temperature to the image object and set whether it was an auto integration capture.
                 image.set_depth(get_depth(retry=True))
                 image.set_pressure(get_pressure(retry=True))
                 image.set_environment_temperature(get_temp(retry=True))
@@ -275,7 +275,7 @@ def main():
                 # Add the image to the session queue to be processed by the session thread
                 current_session.add_image_to_queue(image)
                 print_and_log(f"Added to Queue - Queue size: {current_session.queue_length}")
-                # If in auto mode, check if the image has the correct saturation level and use the ids_interface.calculate_new_exposure() function to calculate a new exposure time if it does not.
+                # If in auto mode, check if the image has the correct saturation level and use the ids_interface.calculate_new_integration() function to calculate a new integration time if it does not.
                 if auto:
                     print_and_log("Auto")
                     attempt_no += 1
@@ -283,24 +283,24 @@ def main():
                     capture_successful = image.correct_saturation
                     print_and_log("capture_successful: ", image.correct_saturation)
                     if not capture_successful:
-                        new_exposure_time = ids_interface.calculate_new_exposure(
-                            current_exposure_time=image.integration_time / 1e6,
+                        new_integration_time_s = ids_interface.calculate_new_integration_time(
+                            current_integration_time_s=image.integration_time_us / 1e6,
                             saturation_fraction=image.inner_saturation_fraction)
 
                         print_and_log(
-                            f"Attempt {attempt_no}: Incorrect Saturation Fraction of {round(image.inner_saturation_fraction, 3)} - at {image.integration_time / 1e6}s - trying at {new_exposure_time}s")
-                        device.exposure_time(seconds=new_exposure_time)
-                        exposure_time = new_exposure_time
-                        desired_exposure_time = exposure_time * 1e6
+                            f"Attempt {attempt_no}: Incorrect Saturation Fraction of {round(image.inner_saturation_fraction, 3)} - at {image.integration_time_us / 1e6}s - trying at {new_integration_time_s}s")
+                        device.integration_time(seconds=new_integration_time_s)
+                        integration_time = new_integration_time_s
+                        desired_integration_time_us = integration_time * 1e6
                     else:
-                        print_and_log(f"Attempt {attempt_no}: Correct saturation at {image.integration_time / 1e6}s")
+                        print_and_log(f"Attempt {attempt_no}: Correct saturation at {image.integration_time_us / 1e6}s")
                         capture_successful = True
                 else:
                     capture_successful = True
 
             print_and_log(f"Captured Image #{current_routine.image_count}")
             print_and_log(f"Timestamp: {image.time_string('%Y-%m-%d %H:%M:%S')}")
-            print_and_log(f"Integration Time: {image.integration_time / 1e6}s ")
+            print_and_log(f"Integration Time: {image.integration_time_us / 1e6}s ")
 
         except Exception as e:
             print_and_log(f"Error Capturing Image {current_routine.image_count}")
@@ -451,10 +451,10 @@ def main():
     if not os.path.exists(PIPE_OUT_FILE):
         os.mkfifo(PIPE_OUT_FILE)
     
-    #Set the camera to continuous acquisition mode and turn off auto exposure and gain
+    #Set the camera to continuous acquisition mode and turn off auto integration and gain
     device.gain(1)
     device.change_sensor_mode("Default")
-    device.exposure_time(seconds=current_routine.int_times[0])
+    device.integration_time(seconds=current_routine.int_times[0])
     
     device.node("AcquisitionMode").SetCurrentEntry("Continuous")
     device.start_acquisition()

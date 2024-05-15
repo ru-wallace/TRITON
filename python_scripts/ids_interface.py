@@ -281,7 +281,7 @@ class Connection:
     def capture_image(self, auto=False):
         image = None
         if auto:
-            image = self.capture_auto_exposure()
+            image = self.capture_auto_integration()
         else:
             image = self.capture_frame(return_type=Resources.IPL_IMAGE)
         
@@ -291,7 +291,7 @@ class Connection:
     
 
         
-    def capture_auto_exposure(self, initial_microseconds=None) -> ids_peak_ipl.Image:
+    def capture_auto_integration(self, initial_microseconds=None) -> ids_peak_ipl.Image:
         previous_acquisition_mode = self.node("AcquisitionMode").CurrentEntry().SymbolicValue() 
         
         if previous_acquisition_mode != "Continuous":
@@ -301,7 +301,7 @@ class Connection:
         self.start_acquisition()
                 
         if initial_microseconds is not None:
-            self.exposure_time(microseconds=initial_microseconds)
+            self.integration_time(microseconds=initial_microseconds)
             
         self.printq("Auto Adjusting Integration Time")
         image_correctly_exposed = False # Assume image will be incorrectly exposed
@@ -313,19 +313,19 @@ class Connection:
             target_fraction = 0.01 #The target fraction of pixels to be oversaturated. 
             target_margin = 0.005 #Images with fraction of pixel saturated above or below this margin are incorrectly exposed
             
-            exposure_time = self.exposure_time()
+            intagration_time = self.integration_time()
             
             saturation_fraction = calculate_saturation_fraction()
             
             if abs(target_fraction - saturation_fraction) > target_margin: #If the image saturation is outside the margin of error perform adjustment
-                new_integration = calculate_new_exposure(exposure_time, saturation_fraction=saturation_fraction, target_fraction=0.01, target_margin=0.005)
+                new_integration = calculate_new_integration_time(intagration_time, saturation_fraction=saturation_fraction, target_fraction=0.01, target_margin=0.005)
                 
-                self.printq(f"Changing integration time to { self.exposure_time(microseconds=new_integration)/1000000}s")
+                self.printq(f"Changing integration time to { self.integration_time(microseconds=new_integration)/1000000}s")
             else:
                 #If within the margin, exit the loop with the correctly exposed image
                 image_correctly_exposed = True
                 self.printq("############### Successful Adjustment ###############")
-                self.printq(f"Correctly Exposed at {exposure_time/1000000}s")
+                self.printq(f"Correctly Exposed at {intagration_time/1000000}s")
                 self.printq(f"Fraction of pixels overexposed: {saturation_fraction}")
                 self.printq(f"Target Fraction: {target_fraction}")
         
@@ -335,10 +335,10 @@ class Connection:
         return image
                     
     
-    def create_cam_image(self, image: ids_peak_ipl.Image, auto:bool=False, exposure_time:float=None, gain:float=None, temperature:float=None)-> cam_image.Cam_Image:
+    def create_cam_image(self, image: ids_peak_ipl.Image, auto:bool=False, integration_time:float=None, gain:float=None, temperature:float=None)-> cam_image.Cam_Image:
         
 
-        image_exposure = exposure_time if exposure_time is not None else self.exposure_time()
+        image_integration_time = integration_time if integration_time is not None else self.integration_time()
         image_gain = gain if gain is not None else self.gain()
         image_temp = temperature if temperature is not None else self.get_temperature()
         image_timestamp_ns = image.Timestamp()
@@ -352,7 +352,7 @@ class Connection:
         try:
             cam_img = cam_image.Cam_Image(image=image_array,
                                     timestamp = image_timestamp,
-                                    integration_time=image_exposure,
+                                    integration_time_us=image_integration_time,
                                     auto=auto,
                                     gain=image_gain,
                                     cam_temp = image_temp,
@@ -377,7 +377,7 @@ class Connection:
             
             current_mode = self.node("AcquisitionMode").CurrentEntry().SymbolicValue()# save previous acq. mode
             
-            #Change to SFA and set to manual exposure start
+            #Change to SFA and set to manual integration start
             self.node("AcquisitionMode").SetCurrentEntry("SingleFrame")
             self.node("TriggerSelector").SetCurrentEntry("ExposureStart")
             self.node("TriggerMode").SetCurrentEntry("Off")
@@ -491,7 +491,7 @@ class Connection:
     
     
         
-    def capture_frame(self, return_type=Resources.NDARRAY, desired_exposure_time_microseconds:float=None) -> np.ndarray|ids_peak_ipl.Image|cam_image.Cam_Image:
+    def capture_frame(self, return_type=Resources.NDARRAY, desired_integration_time_microseconds:float=None) -> np.ndarray|ids_peak_ipl.Image|cam_image.Cam_Image:
         """Capture an image on the device. 
         Acquisition must be started.
         Flushes annd re-Queues buffers before capturing as they may be filled with images from when acquisition started.
@@ -502,11 +502,11 @@ class Connection:
         try:
             
             self.printq("Capturing Image...")
-            exposure=self.exposure_time()
-            if desired_exposure_time_microseconds is not None:
-                buff_time=max(2000, int(desired_exposure_time_microseconds/1000)+500)
+            integration_time_microseconds=self.integration_time()
+            if desired_integration_time_microseconds is not None:
+                buff_time=max(2000, int(desired_integration_time_microseconds/1000)+500)
             else:
-                buff_time=max(2000, int(exposure/1000)+500)
+                buff_time=max(2000, int(integration_time_microseconds/1000)+500)
             
             buffer : ids_peak.Buffer = None
             attempts = 0
@@ -519,11 +519,9 @@ class Connection:
                     buffer = self.datastream.WaitForFinishedBuffer(ids_peak.DataStream.INFINITE_NUMBER)
                     if buffer.HasChunks():
                         self.nodemap.UpdateChunkNodes(buffer)
-                        exposure = self.node("ChunkExposureTime").Value()
-                        if desired_exposure_time_microseconds is not None:
-                            #print(f"Desired time: {desired_exposure_time_microseconds}", file=sys.stderr)
-                            #print(f"Chunk time: {exposure}", file=sys.stderr)
-                            if abs(exposure - desired_exposure_time_microseconds) > desired_exposure_time_microseconds/10:
+                        integration_time_microseconds = self.node("ChunkExposureTime").Value()
+                        if desired_integration_time_microseconds is not None:
+                            if abs(integration_time_microseconds - desired_integration_time_microseconds) > desired_integration_time_microseconds/10:
                                 self.datastream.QueueBuffer(buffer)
                                 buffer = None
                         else:
@@ -562,7 +560,7 @@ class Connection:
             
 
             if return_type == Resources.CAM_IMAGE:
-                return self.create_cam_image(ipl_image, exposure_time=exposure)
+                return self.create_cam_image(ipl_image, integration_time=integration_time_microseconds)
             
             #converted_ipl_image = self.image_converter.Convert(
             #    ipl_image, self.pixel_format)
@@ -590,16 +588,16 @@ class Connection:
     
    
     
-    def exposure_time(self, microseconds:int=None, seconds:float=None) -> int:
-        """Query or Set exposure time.
-        If time or seconds args are not set, just returns exposure time in microseconds,
-        If microseconds OR seconds are set, the exposure time is set to that value, and the new value returned in microseconds.
+    def integration_time(self, microseconds:int=None, seconds:float=None) -> int:
+        """Query or Set integration time.
+        If time or seconds args are not set, just returns integration time in microseconds,
+        If microseconds OR seconds are set, the integration time is set to that value, and the new value returned in microseconds.
 
         Args:
-            microseconds (int, optional): New exposure length in microseconds. Defaults to None.
-            seconds (float, optional): New exposure length in seconds. Defaults to None.
+            microseconds (int, optional): New integration length in microseconds. Defaults to None.
+            seconds (float, optional): New integration length in seconds. Defaults to None.
         Returns:
-            int: new exposure time in microseconds
+            int: new integration time in microseconds
         """    
         try:
             current_gain = self.gain()
@@ -612,36 +610,36 @@ class Connection:
                     
             if microseconds is not None:
                 sensor_mode = self.node("SensorOperationMode").CurrentEntry().SymbolicValue()
-                max_exp = self.node("ExposureTime").Maximum()
-                min_exp = self.node("ExposureTime").Minimum()
+                max_int = self.node("ExposureTime").Maximum()
+                min_int = self.node("ExposureTime").Minimum()
                 previous_acquisition_state=self.acquisition_running
                 
-                if sensor_mode == "Default" and microseconds > max_exp:
+                if sensor_mode == "Default" and microseconds > max_int:
                     if previous_acquisition_state:
                         self.stop_acquisition()
                     self.change_sensor_mode("LongExposure")
                     self.printq("Changing to Long Exposure Mode")
-                    max_exp = self.node("ExposureTime").Maximum()
-                    min_exp = self.node("ExposureTime").Minimum()
+                    max_int = self.node("ExposureTime").Maximum()
+                    min_int = self.node("ExposureTime").Minimum()
                     self.node("PixelFormat").SetCurrentEntry(current_pixel_format)
                     self.gain(current_gain)
                                        
                 
-                if sensor_mode == "LongExposure" and microseconds < min_exp:
+                if sensor_mode == "LongExposure" and microseconds < min_int:
                     if previous_acquisition_state:
                         self.stop_acquisition()
                         
                     self.change_sensor_mode("Default")
                     self.printq("Changing to Default Mode")
-                    max_exp = self.node("ExposureTime").Maximum()
-                    min_exp = self.node("ExposureTime").Minimum()
+                    max_int = self.node("ExposureTime").Maximum()
+                    min_int = self.node("ExposureTime").Minimum()
                     self.node("PixelFormat").SetCurrentEntry(current_pixel_format)
                     self.gain(current_gain)
                     
                 
                 
                      
-                new_time = max(min_exp, min(max_exp, microseconds))
+                new_time = max(min_int, min(max_int, microseconds))
                 self.node("ExposureTime").SetValue(new_time)
                 
                 
@@ -654,7 +652,7 @@ class Connection:
             self.printq("Exposure Time: ", current_time)
             return current_time
         except Exception as e:
-            print(f"Error changing exposure time to {microseconds} microseconds", file=sys.stderr)
+            print(f"Error changing integration time to {microseconds} microseconds", file=sys.stderr)
             traceback.print_exception(e)
     
     def gain(self, gain:float=None) -> float:
@@ -784,7 +782,7 @@ class Connection:
 
     def set_all_to_manual(self) -> bool:
         """Set all Image related camera settings to manual.
-        Turns off auto gain, white balance, exposure time, and colour correction 
+        Turns off auto gain, white balance, integration time, and colour correction 
 
         Returns:
             bool: True if successful
@@ -818,8 +816,8 @@ def calculate_saturation_fraction(image:ids_peak_ipl.Image):
     
     return fraction_saturated
 
-def calculate_new_exposure(current_exposure_time, saturation_fraction:float, target_fraction:float=0.01):
-    new_exposure_time = current_exposure_time
+def calculate_new_integration_time(current_integration_time_s, saturation_fraction:float, target_fraction:float=0.01):
+    new_integration_time = current_integration_time_s
     overexposed_difference = saturation_fraction - target_fraction #Calculate how far the image is from correct saturation level
     
 
@@ -833,9 +831,9 @@ def calculate_new_exposure(current_exposure_time, saturation_fraction:float, tar
     
 
     #Calculate the new guess for a good integration time
-    new_exposure_time  = current_exposure_time*adjustment_factor
+    new_integration_time  = current_integration_time_s*adjustment_factor
         
-    return new_exposure_time
+    return new_integration_time
 
 def make_ROI_start_centre(image:ids_peak_ipl.Image, centre:tuple[int]=None, size:int|tuple[int]=None) -> ids_peak_ipl.Rect2D:
 
