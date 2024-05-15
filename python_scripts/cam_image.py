@@ -48,7 +48,7 @@ class Resources:
 
 class Cam_Image:
     
-    def __init__(self, image:np.ndarray, timestamp:datetime, integration_time_us:int, auto:bool, gain:float, aperture:float, format:str, number:int=None, depth:float=None, pressure:float=None, cam_temp:float=None, environment_temp:float=None,  saturation_threshold:int=250, debayer_method:str = "average_greens", target_saturation_fraction:float=0.01, target_saturation_margin:float=0.005) -> None:
+    def __init__(self, image:np.ndarray, timestamp:datetime, integration_time_us:int, gain:float, aperture:float, format:str,  auto:bool=None, number:int=None, depth:float=None, pressure:float=None, cam_temp:float=None, environment_temp:float=None,  saturation_threshold:int=250, debayer_method:str = "average_greens", target_saturation_fraction:float=0.01, target_saturation_margin:float=0.005) -> None:
         """Create Cam_Image object which contains an Image and a combination of pre-set and calculated metadata.
 
         Args:
@@ -114,6 +114,7 @@ class Cam_Image:
             self._timestamp : datetime = timestamp
 
             self._integration_time_us : int = integration_time_us
+            self._integration_time_secs : float = integration_time_us/1e6
             self._aperture : float = aperture
             self._auto : bool = auto
             
@@ -288,6 +289,10 @@ class Cam_Image:
     @property
     def integration_time_us(self) -> int:
         return self._integration_time_us
+    
+    @property
+    def integration_time_secs(self) -> float:
+        return self._integration_time_secs
     
     @property
     def aperture(self) -> float:
