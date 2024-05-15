@@ -1,187 +1,368 @@
-from harvesters.core import Harvester
+from harvesters.core import Harvester, ParameterSet, ParameterKey, ImageAcquirer, NodeMap, Buffer, DataStream
+import genicam.gentl
 import os
 import numpy as np
 from datetime import datetime, timedelta
 import traceback
 from cam_image import Cam_Image
-
+from time import sleep
+import math
 PRODUCER_PATH = os.environ.get('PRODUCER_PATH')
 PRODUCER_PATH = "/opt/ids-peak-with-ueyetl_2.7.1.0-16417_arm64/lib/ids/cti/ids_u3vgentl.cti"
 
+#Return Types
+CAM_IMAGE = "cam_image"
+"""cam_image.Cam_Image object"""
+NDARRAY = "nd_array"
+"""numpy.ndarray Object"""
+
+#Pixel Formats
+
+MONO8 = "Mono8"
+""" 8-bit monochrome pixel format """
+RGB8 = "RGB8"
+""" 8-bit RGB pixel format """
+BAYER_RG8 = "BayerRG8"
+""" 8-bit Bayer RG pixel format """
+
+#Acquisition Modes
+SINGLE_FRAME = "SingleFrame"
+""" Single Frame Acquisition Mode """
+MULTI_FRAME = "MultiFrame"
+""" Multi Frame Acquisition Mode """
+CONTINUOUS = "Continuous"
+""" Continuous Acquisition Mode """
+
+#Sensor Operation Modes
+DEFAULT = "Default"
+""" Default Sensor Mode """
+LONG_EXPOSURE = "LongExposure"
+""" Long Exposure Sensor Mode """
+
+
+#Time Units
+US = "microseconds"
+""" Microseconds """
+MICROSECONDS = "microseconds"
+""" Microseconds """
+
+S = "seconds"
+""" Seconds """
+SECONDS = "seconds"
+""" Seconds """
+
+MS = "milliseconds"
+""" Milliseconds """
+MILLISECONDS = "milliseconds"
+""" Milliseconds """
+
+NS = "nanoseconds"
+""" Nanoseconds """
+NANOSECONDS = "nanoseconds"
+""" Nanoseconds """
 
 class Camera:
+    
+    def connect(self):
+        try:
+            self.harvester.update()
+            
+            # Create an image acquirer with auto chunk data update enabled
+            self.acquisition_params = ParameterSet()
+            self.acquisition_params.add(ParameterKey.ENABLE_AUTO_CHUNK_DATA_UPDATE, True)
+            self.device:ImageAcquirer = self.harvester.create(config=self.acquisition_params)
+            
+            self.nodemap:NodeMap = self.device.remote_device.node_map
+            self.data_stream: genicam.gentl.DataStream = self.device.data_streams[0]
+            self.ds_nodemap: NodeMap= self.data_stream.node_map
+            #Set Buffer Handling Mode to Newest Only
+            self.ds_nodemap.StreamBufferHandlingMode.set_value("NewestOnly")
+            
+            #Reset device timestamp to zero
+            self.nodemap.TimestampReset.execute()
+            while not self.nodemap.TimestampReset.is_done():
+                sleep(0.1)
+            self.start_time = datetime.now()
+
+        except Exception as e:
+            traceback.print_exception(e)
+
+
     def __init__(self) -> None:
-        h = Harvester() 
+        
+        self.harvester = Harvester() 
+        self.connected = False
         
         # Add producer file path
-        h.add_file(PRODUCER_PATH)
-        h.update()
-        self.device = h.create()
-        self.nodemap = self.device.remote_device.node_map
-        self.data_stream = self.device.data_streams[0]
-        print("Datastream:")
-        print(self._query_node_list("Buffer", nodemap=self.data_stream.node_map))
-        self.data_stream.node_map.StreamBufferHandlingMode.set_value("NewestOnly")
-        #Reset device timestamp to zero
-        self.nodemap.TimestampReset.execute()
+        self.harvester.add_file(PRODUCER_PATH)
+        self.harvester.update()
+
+        self.connect()
+        # Create an image acquirer with auto chunk data update enabled
+        self.acquisition_params = ParameterSet()
+        self.acquisition_params.add(ParameterKey.ENABLE_AUTO_CHUNK_DATA_UPDATE, True)
+        self.device:ImageAcquirer = self.harvester.create(config=self.acquisition_params)
+        
+        self.nodemap:NodeMap = self.device.remote_device.node_map
+        self.data_stream: genicam.gentl.DataStream = self.device.data_streams[0]
+        self.ds_nodemap: NodeMap= self.data_stream.node_map
+
         self.start_time = datetime.now()
-        self.clock_tick_length = 1/self.nodemap.DeviceClockFrequency.value
+
 
         #Set Pixel Format to BayerRG8 if available, else set to Mono8
-        if "BayerRG8" in self._valid_pixel_formats():
-            self.nodemap.PixelFormat.set_value("BayerRG8")
+        if BAYER_RG8 in self._valid_pixel_formats():
+            self.nodemap.PixelFormat.set_value(BAYER_RG8)
         else:
-            self.nodemap.PixelFormat.set_value("Mono8")
+            self.nodemap.PixelFormat.set_value(MONO8)
         
         
         
         # Activate chunk mode and enable pixelformat and exposure time chunks so the device passes this data along with the image
-        self.nodemap.ChunkModeActive.set_value("True")
+        chunks = ["Timestamp", "ExposureTime", "Width", "Height", "PixelFormat", "Gain"]
+        self.activate_chunks(chunks)
+
+    
+    def activate_chunks(self, chunks:list[str]):  
+        self.nodemap.ChunkModeActive.set_value("False")
         for entry in self.nodemap.ChunkSelector._get_symbolics():
-            if entry in ["ExposureTime", "PixelFormat"]:
+            if entry in chunks:
                 print(f"Setting {entry} to True")
                 self.nodemap.ChunkSelector.set_value(entry)
                 self.nodemap.ChunkEnable.set_value("True")
+        self.nodemap.ChunkModeActive.set_value("True")
+        
+    def start_acquisition(self, mode:str="Continuous"):
+        if self.device.is_acquiring():
+            return
+        self.device._enable_auto_chunk_data_update = True
+        self.device.update_chunk_automatically = True
+        self.device.AcquisitionMode.set_value(mode)
+        self.device.start()
+
+    @property
+    def connected(self):
+        return self.device.is_valid()
                 
-    
-              
-    def capture_image(self, auto=False):
+    def capture_image(self, return_type:str=CAM_IMAGE, target_integration_time_us:int=None):
         try:
-            #print("Min Buffers: ", self.data_stream.NumBuffersAnnouncedMinRequired())
-            self.auto_exposure_device(auto)
-                
-            self.device.start()
+            if not self.device.is_acquiring():
+                raise Exception("Device is not acquiring")
+            
+
             image_array = None
             
+            buffer:Buffer = None
             
-            with self.device.fetch() as buffer:
-                image = buffer.payload.components[0].data
+            correct_integration_attempts = 0
+            fetch_attempts = 0
+            while buffer is None:
                 
-                image_array = np.array(image).reshape(buffer.height, buffer.width).copy()
+                try:
+                    buffer:Buffer = self.device.fetch(300)
+
+                    integration_time_us = self.nodemap.ChunkExposureTime.value
+                    if target_integration_time_us is not None:
+                        if abs(integration_time_us - target_integration_time_us) > target_integration_time_us/10:
+                            buffer.queue()
+                            buffer = None
+                    else:
+                        if correct_integration_attempts == self.data_stream.num_announced:
+                            break
+                        buffer.queue()
+                        buffer=None
+                        correct_integration_attempts += 1
+            
+                except Exception as e:
+
+                    fetch_attempts +=1
+                    if fetch_attempts > 10:
+                        raise Exception("Failed to fetch buffer after 10 attempts")
+
+            component = buffer.payload.components[0]
+            image = component.data
+            
+            image_array = image.reshape(component.height, component.width)
+            
+            format = component.data_format
+            
+            buffer.queue()
+             
+            clock_timestamp = buffer.timestamp_ns/(10**9)
                 
-                format = buffer.payload.components[0].data_format
-                print("Format: ", format)
-                
-                clock_timestamp = buffer.timestamp_ns/(10**9)
-                
-                timestamp = self.start_time + timedelta(seconds = clock_timestamp)
-                buffer.update_chunk_data()
-                
-                
-                
-                exposure_time = self.nodemap.ChunkExposureTime.value
-                print("Exposure time: ", exposure_time)
-                #print("Brightness Auto Status: ", self.nodemap.BrightnessAutoStatus.value)
-                
-                
-            self.device.stop()  
-            return Cam_Image(image_array,  format=format, timestamp = timestamp, integration_time_us = exposure_time, gain = 1, cam_temp = 0, depth = 0 )
+            timestamp = self.start_time + timedelta(seconds = clock_timestamp)
+            
+            temperature = self.nodemap.DeviceTemperature.value
+
+            return Cam_Image(image_array, 
+                             format=format,
+                             timestamp = timestamp, 
+                             integration_time_us = integration_time_us,
+                             gain = 1, 
+                             aperture=1,
+                             cam_temp=temperature)
         except Exception as e:
             traceback.print_exc(e)
             return None    
     
     
-    def auto_exposure_device(self, on=True):
-        if not on:
-            self.nodemap.GainAuto.set_value("Off")
-            self.nodemap.ExposureAuto.set_value("Off")
-            return self.nodemap.ExposureAuto.value == "Off"
-        self.nodemap.BrightnessAutoFramerateLimitMode.set_value("Off")
-        self.set_exposure_time(seconds=0.001)
-        
+    def _get_integration_time_us(self):
+        """
+        Get the integration time in microseconds.
 
-        self.nodemap.GainAuto.set_value("Off")
-        self.nodemap.ExposureAuto.set_value("Off")
-        self.set_exposure_time(seconds=0.001)
-        self.nodemap.BrightnessAutoExposureTimeLimitMode.set_value("Off")
-        self.nodemap.BrightnessAutoPercentile.set_value(5)
-        self.nodemap.BrightnessAutoTarget.set_value(250)
-        self.nodemap.BrightnessAutoTargetTolerance.set_value(1)
-        self.nodemap.ExposureAuto.set_value("Continuous")
-
-        
-        
-        
-        old_mode = self.nodemap.SensorOperationMode.value
-        mode = ""
-        time = None
-        self.capture_empty_until_stable()
-        print("--")
-
-        print("Device Exposure Time: ", self.nodemap.ExposureTime.value)
-        
-        if self.nodemap.ExposureTime.value == self.nodemap.ExposureTime.max and old_mode != "LongExposure":
-            mode = "LongExposure"
-        elif self.nodemap.ExposureTime.value == self.nodemap.ExposureTime.min and old_mode == "LongExposure":
-            mode = "Default"
+        Returns:
+            float: The integration time in microseconds.
+        """
+        return self.nodemap.ExposureTime.value
     
-        if mode != "":
-            
-            self.load_set(mode)
-            self.nodemap.BrightnessAutoFramerateLimitMode.set_value("Off")
-            
-            
-        
-        self.capture_empty_until_stable()
-        print("Device Exposure Time: ", self.nodemap.ExposureTime.value)
-            
-        self.nodemap.ExposureAuto.set_value("Continuous")
-        
-
-        self.print_settings()
-          
-        return self.nodemap.ExposureAuto.value == "Continuous"
-
+    @property
+    def integration_time_microseconds(self):
+        return self._get_integration_time_us()
     
-    def set_exposure_time(self, seconds):
+    @property
+    def integration_time_seconds(self):
+        return convert_time(self._get_integration_time_us(), MICROSECONDS, SECONDS)
+
+    def _get_integration_min_max(self, time_unit:str=MICROSECONDS)-> tuple:
+        """
+        Get the minimum and maximum integration time for the device.
+
+        Args:
+            time_unit (str): The unit of time to convert the integration time to. Default is MICROSECONDS.
+
+        Returns:
+            tuple: A tuple containing the minimum and maximum integration time in the specified time unit.
+        """
+        min_time = convert_time(self.nodemap.ExposureTime.min, MICROSECONDS, time_unit)
+        max_time = convert_time(self.nodemap.ExposureTime.max, MICROSECONDS, time_unit)
+        return min_time, max_time
+    
+    def integration_time(self, time:float=None, time_unit:str=MICROSECONDS):
         try:
-            self.nodemap.ExposureAuto.set_value("Off")
-            new_time = max(self.nodemap.ExposureTime.min, min(self.nodemap.ExposureTime.max, int(seconds*(10**6))))
-            self.nodemap.ExposureTime.set_value(new_time)
-            return True
+            
+            if time is None:
+                return convert_time(self._get_integration_time_us(), MICROSECONDS, time_unit)
+            
+            if time < 0:
+                raise ValueError("Integration time must be positive")
+            
+            if self.nodemap.ExposureAuto.value != "Off":
+                raise ValueError("Auto Exposure is enabled")
+            
+            #Get current settings
+            current_gain = self.nodemap.Gain.value
+            current_pixel_format = self.nodemap.PixelFormat.value
+            current_acquisition_mode = self.nodemap.AcquisitionMode.value
+            acquisition_state = self.device.is_acquiring()
+            
+            time_us = convert_time(time, time_unit, MICROSECONDS)
+
+            max_time = self.nodemap.ExposureTime.max
+            min_time = self.nodemap.ExposureTime.min
+            sensor_mode = self.nodemap.SensorOperationMode.value
+            
+            if time_us < min_time:
+                if sensor_mode == LONG_EXPOSURE:
+                    self.stop_acquisition()
+                    self.change_sensor_mode(DEFAULT)
+            
+            if time_us > max_time:
+                if sensor_mode == DEFAULT:
+                    self.stop_acquisition()
+                    self.change_sensor_mode(LONG_EXPOSURE)
+            
+            max_time = self.nodemap.ExposureTime.max
+            min_time = self.nodemap.ExposureTime.min      
+            
+            time_us = max(min_time, min(max_time, time_us))
+            
+            self.nodemap.ExposureTime.set_value(time_us)
+            
+            self.nodemap.PixelFormat.set_value(current_pixel_format)
+            self.nodemap.Gain.set_value(current_gain)
+            self.nodemap.AcquisitionMode.set_value(current_acquisition_mode)
+            if acquisition_state:
+                self.device.start()
+
+            return convert_time(self.nodemap.ExposureTime.value, MICROSECONDS, time_unit)
         except Exception as e:
             print("Problem setting exposure time")
-            traceback.print_exc(e)
-            return False
-
-    def set_pixel_format(self, pixel_format):
+            traceback.print_exception(e)
+            return None
+        
+    def change_sensor_mode(self, mode:str=DEFAULT):
+        acquisition_state = self.device.is_acquiring()
+        acquisition_mode = self.nodemap.AcquisitionMode.value
+        current_pixel_format = self.nodemap.PixelFormat.value
+        current_gain = self.nodemap.Gain.value
+        current_buffer_handling_mode = self.ds_nodemap.StreamBufferHandlingMode.value
+        
+        if acquisition_state:
+            self.device.stop()
+            
+        if mode not in [DEFAULT, LONG_EXPOSURE, "UserSet0", "UserSet1"]:
+            raise ValueError("Invalid Sensor Mode")
+        self.nodemap.UserSetSelector.set_value(mode)
+        self.nodemap.UserSetLoad.execute()
+        
+        self.nodemap.PixelFormat.set_value(current_pixel_format)
+        self.nodemap.Gain.set_value(current_gain)
+        self.ds_nodemap.StreamBufferHandlingMode.set_value(current_buffer_handling_mode)
+        self.nodemap.AcquisitionMode.set_value(acquisition_mode)
+        
+        if acquisition_state:
+            self.device.start()
+    
+    def _get_gain_min_max(self):
+        return self.nodemap.Gain.min, self.nodemap.Gain.max
+    
+    def gain(self, gain:float=None):
         try:
-            self.nodemap.PixelFormat.set_value(pixel_format)
-            return True
-        except:
-            return False
-
-    def capture_empty_image(self, number=1):
-        print(f"Capturing {number} empty images")
+            if gain is None:
+                return self.nodemap.Gain.value
+            if gain < 0:
+                raise ValueError("Gain must be positive")
+            
+            gain_min, gain_max = self._get_gain_min_max()
+            gain = max(gain_min, min(gain_max, gain))
+            
+            self.nodemap.Gain.set_value(gain)
+            return self.nodemap.Gain.value
+        except Exception as e:
+            print("Problem setting gain")
+            traceback.print_exception(e)
+            return None
+    
+    def set_to_manual(self, setting:list[str]=["ExposureTime", "Gain", "WhiteBalance", "ColorCorrection"]):
+        if "ExposureTime" in setting:
+            try:
+                self.nodemap.ExposureAuto.set_value("Off")
+            except:
+                pass
+        if "Gain" in setting:
+            try:
+                self.nodemap.GainAuto.set_value("Off")
+            except:
+                pass
+        if "WhiteBalance" in setting:
+            try:
+                self.nodemap.BalanceWhiteAuto.set_value("Off")
+            except:
+                pass
+        if "ColorCorrection" in setting:
+            try:
+                self.nodemap.ColorTransformationAuto.set_value("Off")
+            except:
+                pass
         
-        for i in range(number):
-            self.device.start()
-            with self.device.fetch() as buffer:
-                buffer.update_chunk_data()
-                time = self.nodemap.ChunkExposureTime.value
-                print("Empty image - Exposure Time: ", time/10**6, "S")
+    def stop_acquisition(self):
+        if self.device.is_acquiring():
             self.device.stop()
-        
-    def capture_empty_until_stable(self):
-        print("Capturing empty images until stable")
-        stable = False
-        last_exposure_time = 0
-        iterations = 0
-        while not stable:
-            #self.capture_empty_image(3)
-            self.device.start()
-            with self.device.fetch() as buffer:
-                buffer.update_chunk_data()
-                time = self.nodemap.ChunkExposureTime.value
-                print("Empty Image - Exposure Time: ", time/10**6, "S")
-                if time == last_exposure_time:
-                    stable = True
-                last_exposure_time = time
-            self.device.stop()
-            self.data_stream.flush()
-            iterations += 1
-        print("Final Exposure Time: ", last_exposure_time/10**6, "S")
-        print("Iterations: ", iterations)
+    
+    def disconnect(self):
+        self.stop_acquisition()
+        self.device.destroy()
+        self.harvester.reset()
         
     def print_settings(self):
         print("User Set: ", self.nodemap.UserSetSelector.value)
@@ -194,6 +375,7 @@ class Camera:
         print("GainAuto: ",self.nodemap.GainAuto.value)
         print("Sensor Op Mode: ",self.nodemap.SensorOperationMode.value)
         print("Camera Temp: ", self.nodemap.DeviceTemperature.value)
+        
         print("Min Exposure Time: ", self.nodemap.ExposureTime.min/(10**6), "S")
         print("Max Exposure Time: ", self.nodemap.ExposureTime.max/(10**6), "S")
 
@@ -231,7 +413,6 @@ class Camera:
         return self.nodemap.PixelFormat._get_symbolics()
         
     def _node_list(self, nodemap=None):
-
         if nodemap is None:
             nodemap = self.nodemap
             
@@ -256,7 +437,71 @@ class Camera:
                 except:
                     print(f"{node}: {value}")
                     pass
-                
+       
+       
+def convert_time(value: float|int, input_unit: str, target_unit: str) -> float|int:
+    """
+    Converts a time value from one unit to another.
+
+    Args:
+        value (float|int): The time value to be converted.
+        input_unit (str): The unit of the input time value.
+        target_unit (str): The unit to which the time value should be converted.
+
+    Returns:
+        float|int: The converted time value.
+
+    Raises:
+        None
+
+    Examples:
+        >>> convert_time(1000, "milliseconds", "seconds")
+        1.0
+        >>> convert_time(1, "seconds", "milliseconds")
+        1000.0
+    """
+    if input_unit == target_unit:
+        return value
+    unit_dict = {"seconds": 1, "milliseconds": 10**3, "microseconds": 10**6, "nanoseconds": 10**9}
+    return value * unit_dict[target_unit] / unit_dict[input_unit]
+
+
+def calculate_new_integration_time(current_integration_time, saturation_fraction:float, target_fraction:float=0.01):
+    
+    overexposed_difference = saturation_fraction - target_fraction #Calculate how far the image is from correct saturation level
+    #Calculate adjustment factor. The current integration time will be multiplied by this to get the new integration time guess.
+    #The factor is limited to between 20 and 0.01 (as sometimes small values can lead to crazy numbers)
+    
+    #The adjustment scales with the ralationship between the size of the saturation error and the target saturation fraction
+    #If the difference is large, the adjustment is large, and vice versa. This is fairly quick but could probably be optimised (Maybe with a PID type control?)
+
+    adjustment_factor = min(10, max(0.1, 1 - (overexposed_difference)/target_fraction ))
+    
+
+    #Calculate the new guess for a good integration time
+    new_integration_time  = current_integration_time*adjustment_factor
+        
+    return new_integration_time
+
+def calculate_new_integration_time_pid(current_integration_time, saturation_fraction:float, integral_error:float, target_fraction:float=0.01, Kp=1.0, Ki=0.1):
+# Calculate how far the image is from correct saturation level
+    # Take the logarithm of the saturation fraction to linearize the relationship
+    overexposed_difference = math.log(saturation_fraction) - math.log(target_fraction)
+
+    # Calculate proportional term
+    proportional_error = overexposed_difference / math.log(target_fraction)
+
+    # Update integral term
+    integral_error += overexposed_difference
+
+    # Calculate adjustment factor using PI controller
+    adjustment_factor = Kp * proportional_error + Ki * integral_error
+
+    # Calculate the new guess for a good integration time
+    new_integration_time  = current_integration_time * adjustment_factor
+
+    return new_integration_time, integral_error
+     
         
 if __name__ == "__main__":
     c = Camera()
