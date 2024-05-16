@@ -57,11 +57,16 @@ The tools will only work on Linux based operating systems. The system is designe
 
         runcam [options]  
   
+## Usage
+
+
+
 ## Concepts
 
 ### Device Communication
 
-The application operates the camera using an implementation of the IDS Peak API in the ids_interface.py file. Functions are provided to control all of the features of an IDS Peak Ueye+ USB 3 camera. Both Colour and Monochrome devices are supported. On loading the device, all automatic features of the camera such as auto-exposure, auto-gain and colour correction are turned off. The device is configured to use BayerRG8 or Mono8 pixel formats for colour and monochrome devices respectively. This means that the raw digital data is returned in 8-bit format.
+The application operates a camera using an implementation of the [*GenICam*](https://www.emva.org/standards-technology/genicam/) *GenTL* API  in the device_interface.py file. The Harvesters Image Acquisition Engine package for Python as maintained by the GenICam committee is used to generate images. 
+Functions are provided to control all of the features of an IDS Peak UEye+ USB 3 camera. Both Colour and Monochrome devices are supported. On loading the device, all automatic features of the camera such as auto-exposure, auto-gain and colour correction are turned off. The device is configured to use BayerRG8 or Mono8 pixel formats for colour and monochrome devices respectively. This means that the raw digital data is returned in 8-bit format.
 
 A custom algorithm for adjusting integration time automatically is used, though for very low light it can be slow.
 
@@ -93,9 +98,11 @@ The directory uses the following structure:
 
 - ```session.json```: A JSON formatted list of each image captured in the session, and metadata including the time, number, camera temperature, integration time, gain, and the raw and processed measurements calculated for that image (see [Image Processing](#image-processing)).
 
--```images.csv```: Every time a routine is run which adds images to the session , a new run csv file is added which contains all metadata for each image.
+- ```images.csv```: Every time a routine is run which adds images to the session , a new run csv file is added which contains all metadata for each image.
 
 - ```output.log```: This file contains the output of the auto_capture.py python script as it executes the routine. This is useful for debugging if there is an issue with the routine running.
+
+### Routines
 
 ### Image Processing
 
@@ -126,8 +133,8 @@ Explanation of Luminance Calcs ----------------------------
 
 #### Auto adjustment of integration time
 
-For the inner active region the white fraction is used to drive the auto-adjustment of integration time if used. A test image is taken and the inner white fraction calculated. This is compared against a target white fraction - 0.01  (1% saturation) by default.
+For the inner active region the white fraction is used to drive the auto-adjustment of integration time if used. A test image is taken and the inner white fraction calculated. This is compared against a target saturation fraction - 0.01  (1% saturation) by default.
 
-The integration time is increased or decreased proportionally to get closer to the target fraction, and the process repeated until within 0.005 of the target. For short integration times below 1/10th of a second this is trivial, but can be time consuming for longer captures, especially into the tens of seconds.
+The integration time is increased or decreased proportionally to get closer to the target fraction, and the process repeated until within 5% of the target. For short integration times below 1/10th of a second this is trivial, but can be time consuming for longer captures, especially into the tens of seconds.
 
 ## Usage
