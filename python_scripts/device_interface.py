@@ -1,5 +1,4 @@
-from harvesters.core import Harvester, ParameterSet, ParameterKey, ImageAcquirer, NodeMap, Buffer, DataStream
-import genicam.gentl
+from harvesters.core import Harvester, ParameterSet, ParameterKey, ImageAcquirer, NodeMap, Buffer
 import os
 import numpy as np
 from datetime import datetime, timedelta
@@ -78,7 +77,7 @@ class Camera:
             self.device:ImageAcquirer = self.harvester.create(config=self.acquisition_params)
             
             self.nodemap:NodeMap = self.device.remote_device.node_map
-            self.data_stream: genicam.gentl.DataStream = self.device.data_streams[0]
+            self.data_stream = self.device.data_streams[0]
             self.ds_nodemap: NodeMap= self.data_stream.node_map
             #Set Buffer Handling Mode to Newest Only
             self.ds_nodemap.StreamBufferHandlingMode.set_value("NewestOnly")
