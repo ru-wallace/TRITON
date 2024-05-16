@@ -7,6 +7,7 @@ from datetime import datetime
 import sys, os
 import warnings
 import math
+from eprint import eprint
 warnings.filterwarnings("ignore", module=".*colour.*")
 
 import colour_demosaicing
@@ -141,8 +142,9 @@ class Cam_Image:
         mode = "L"
         if self.format=="BayerRG8":
                     mode="RGB"
-                    self._image_array : np.ndarray = debayer(self.original_image_array, method=method, pattern=pattern)
                     
+                    self._image_array : np.ndarray = debayer(self.original_image_array, method=method, pattern=pattern)
+
         
         self._image : Image.Image = Image.fromarray(self._image_array, mode=mode)
 
