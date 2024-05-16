@@ -26,7 +26,9 @@ USB_MEMORY_FILE="/sys/module/usbcore/parameters/usbfs_memory_mb"
 ROUTINE_FILE=""
 SESSION_NAME=""
 
+
 source "$CONDA_DIRECTORY/etc/profile.d/conda.sh"
+
 conda activate ids_device
 
 
@@ -34,22 +36,36 @@ conda activate ids_device
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -h|--help)
-            echo "Usage: $0 [OPTIONS]"
+            echo "Usage: runcam [OPTIONS]"
+            echo ""
+            echo "runcam is a tool for interfacing with IDS USB3Vision cameras and controlling auto-capture routines."
+            echo ""
             echo "Options:"
-            echo "  -h, --help              Show this help message"
-            echo "  -b, --buffer [size]     Change the USB buffer size for this Linux device to [size]mb. If no size is specified, the buffer size will be set to 1000mb"
-            echo "  -f, --focus             Test Focus of camera"
-            echo "  -l, --log               View output log of a current active process"
-            echo "  -n [ --node ] < --get | --set <value> > Get or set value of node by name (e.g. -n "ExposureTime" --set 1000)."              
+            echo "  -h, --help              Display this help message and exit"
+            echo "  -b, --buffer [size]     Set USB buffer size for this Linux device to [size]mb (default: 1000)"
+            echo "  -f, --focus             Test camera focus"
+            echo "  -l, --log               View output log of current active process"
+            echo "  -n, --node [name]       Get or set value of a device node by name"
+            echo "                          Sub-options:"
+            echo "                            --get          Get the value of the node"
+            echo "                            --set [value]  Set the value of the node to [value]"
             echo "  -q, --query             Check for active runcam process"
-            echo "  -r, --routine FILE      Specify a routine file. The ./routines directory in the Aegir DATA_DIRECTORY  (specified in .env) will be looked at if full path not specified"
+            echo "  -r, --routine FILE      Specify a routine file (default directory: ./routines in Aegir DATA_DIRECTORY)"
             echo "  -s, --session           Specify session name"
-            echo "  -x, --stop              Send stop signal to a currently running process"
-            echo "  --harvesters            Run autocam in harvesters mode"
-            echo "  --run <python script file location>   ONLY USE IF YOU KNOW WHAT YOU ARE DOING: Run a python script with the environment set up as used by this tool. I.e GenTL Producer path is set.            "
-
+            echo "  -x, --stop              Send stop signal to currently running process"
+            echo "      --harvesters        Run autocam in harvesters mode"
+            echo "      --run FILE          Run a python script with the environment set up by this tool (advanced users only)"
+            echo ""
+            echo "Examples:"
+            echo "  runcam --buffer 500         Set USB buffer size to 500mb"
+            echo "  runcam --focus              Test camera focus"
+            echo "  runcam --node \"ExposureTime\" --get"
+            echo "                          Get the value of node \"ExposureTime\""
+            echo "  runcam --node \"ExposureTime\" --set 1000"
+            echo "                          Set the value of node \"ExposureTime\" to 1000 microseconds"
+            echo ""
             exit 0
-            ;;
+        ;;
         -b|--buffer)
             if [ -n "$2" ]; then
                 USB_BUFFER_SIZE="$2"
