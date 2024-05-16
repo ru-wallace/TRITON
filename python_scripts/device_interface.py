@@ -7,6 +7,10 @@ import traceback
 from cam_image import Cam_Image
 from time import sleep
 import math
+import sys
+import threading
+
+from eprint import eprint
 PRODUCER_PATH = os.environ.get('PRODUCER_PATH')
 PRODUCER_PATH = "/opt/ids-peak-with-ueyetl_2.7.1.0-16417_arm64/lib/ids/cti/ids_u3vgentl.cti"
 
@@ -62,6 +66,7 @@ NANOSECONDS = "nanoseconds"
 """ Nanoseconds """
 
 class Camera:
+
     
     def connect(self):
         try:
@@ -97,11 +102,9 @@ class Camera:
 
 
         self.connect()
-
-
         self.start_time = datetime.now()
 
-
+        self.cap_thread:threading.Thread = None
         #Set Pixel Format to BayerRG8 if available, else set to Mono8
         if BAYER_RG8 in self._valid_pixel_formats():
             self.nodemap.PixelFormat.set_value(BAYER_RG8)
@@ -113,17 +116,17 @@ class Camera:
         self.activate_chunks(chunks)
 
     
-    def activate_chunks(self, chunks:list[str]):  
-        self.nodemap.ChunkModeActive.set_value("True")
+    def activate_chunks(self, chunks:list[str]=["Timestamp", "ExposureTime", "Width", "Height", "PixelFormat", "Gain"]):  
+        self.nodemap.ChunkModeActive.set_value("False")
         for entry in self.nodemap.ChunkSelector._get_symbolics():
             if entry in chunks:
-                print(f"Setting {entry} to True")
                 self.nodemap.ChunkSelector.set_value(entry)
                 self.nodemap.ChunkEnable.set_value("True")
         self.nodemap.ChunkModeActive.set_value("True")
         
         
     def start_acquisition(self, mode:str="Continuous"):
+        self.activate_chunks()
         if self.device.is_acquiring():
             return
 
@@ -133,6 +136,10 @@ class Camera:
     @property
     def connected(self):
         return self.device.is_valid()
+    
+    @property
+    def acquiring(self):
+        return self.device.is_acquiring()
                 
     def capture_image(self, return_type:str=CAM_IMAGE, target_integration_time_us:int=None):
         try:
@@ -151,9 +158,9 @@ class Camera:
                 
                 try:
                     buffer:Buffer = self.device.fetch()
-                    buffer.update_chunk_data()
+                    #buffer.update_chunk_data()
                     integration_time_us = self.nodemap.ChunkExposureTime.value
-                    buffer._attributes
+                    
                     if target_integration_time_us is not None:
                         if abs(integration_time_us - target_integration_time_us) > target_integration_time_us/10:
                             buffer.queue()
@@ -166,24 +173,26 @@ class Camera:
                         correct_integration_attempts += 1
             
                 except Exception as e:
-
+                    traceback.print_exception(e, file=sys.stderr)
                     fetch_attempts +=1
                     if fetch_attempts > 10:
                         raise Exception("Failed to fetch buffer after 10 attempts")
 
+            clock_timestamp = buffer.timestamp_ns/(10**9)
             component = buffer.payload.components[0]
             image = component.data
             
-            image_array = image.reshape(component.height, component.width)
-            
+            image_array = image.reshape(component.height, component.width).copy()
+
+            if return_type == NDARRAY:
+                buffer.queue()
+                return image_array
+
             format = component.data_format
-            
-            integration_time_us =  self.nodemap.ChunkExposureTime.value
+
             
             buffer.queue()
-            
-            clock_timestamp = buffer.timestamp_ns/(10**9)
-                
+
             timestamp = self.start_time + timedelta(seconds = clock_timestamp)
             
             temperature = self.nodemap.DeviceTemperature.value
@@ -200,6 +209,58 @@ class Camera:
             return None    
     
     
+    def start_continuous_capture(self, callback,  callback_args=[], auto:bool=False, integration_time_us=None, gain:float=None, callback_as_thread:bool=True):
+        self.cap_thread = threading.Thread(target=self._continous_capture_thread, args = [callback, callback_args, auto, integration_time_us, gain, callback_as_thread], daemon=True)
+        self.cap_thread.daemon = True
+        self.cap_thread.start()
+        
+    
+    def _continous_capture_thread(self, callback, callback_args=[], auto:bool=False, integration_time_us=None, gain:float=None, callback_as_thread:bool=False):
+        self.stop_acquisition()
+        auto_value = self.nodemap.ExposureAuto.value
+        sensor_mode = self.nodemap.UserSetSelector.value
+        
+        self.change_sensor_mode(DEFAULT)
+        self.nodemap.AcquisitionMode.set_value(CONTINUOUS)
+        auto_value = self.nodemap.ExposureAuto.value
+        if integration_time_us is not None and auto_value == "Off":
+            self.integration_time(integration_time_us)
+        
+        self.stop_capture = False
+        if auto:
+            self.nodemap.ExposureAuto.set_value(CONTINUOUS)
+        callback_thread:threading.Thread = None
+        self.start_acquisition()
+        while not self.stop_capture:
+            try:
+                if not self.acquiring:
+                    break
+                with self.device.fetch() as buffer:
+                    component = buffer.payload.components[0]
+                    image_array = component.data.copy()
+                    shape = np.array((component.height, component.width)).copy()
+                    integration_time_us = self.nodemap.ChunkExposureTime.value
+                    if callback_as_thread:
+                        callback_thread = threading.Thread(target=callback, args=[image_array, integration_time_us, shape, *callback_args], daemon=True)
+                        callback_thread.daemon = True
+                        callback_thread.start()
+                    else:
+                        callback(image_array, integration_time_us, callback_args)
+            except Exception as e:
+                traceback.print_exception(e)
+                self.stop_capture = True
+                break
+
+        self.stop_acquisition()
+        self.nodemap.ExposureAuto.set_value(auto_value)
+        self.change_sensor_mode(sensor_mode)
+            
+            
+    def stop_continous_capture(self):
+        self.stop_capture = True
+        if self.cap_thread is not None:
+            self.cap_thread.join()
+    
     def _get_integration_time_us(self):
         """
         Get the integration time in microseconds.
@@ -208,6 +269,39 @@ class Camera:
             float: The integration time in microseconds.
         """
         return self.nodemap.ExposureTime.value
+    
+    def set_auto_params(self, target:int, tolerance:float, percentile:float, min_int=0, max_int=None, time_unit:str=MICROSECONDS):
+        
+        if min_int != 0 or max_int is not None:
+            self.nodemap.BrightnessAutoExposureTimeLimitMode.set_value("On")
+        min_int = convert_time(min_int, time_unit, MICROSECONDS)
+        
+        
+        int_min_poss, int_max_poss = self._get_integration_min_max()
+        if max_int is None:
+            max_int = int_max_poss
+        else:
+            max_int = convert_time(max_int, time_unit, MICROSECONDS)
+            
+        self.nodemap.BrightnessAutoExposureTimeMin.set_value(max(min_int, int_min_poss))
+        self.nodemap.BrightnessAutoExposureTimeMax.set_value(min(max_int, int_max_poss))
+        
+        
+        self.nodemap.BrightnessAutoTarget.set_value(target)
+        self.nodemap.BrightnessAutoTargetTolerance.set_value(tolerance)
+
+        self.nodemap.BrightnessAutoPercentile.set_value(percentile)
+        
+    
+    @property
+    def temp(self):
+        return self.nodemap.DeviceTemperature.value
+    
+        
+    @property
+    def temperature(self):
+        return self.nodemap.DeviceTemperature.value
+    
     
     @property
     def integration_time_microseconds(self):
@@ -244,9 +338,7 @@ class Camera:
                 raise ValueError("Auto Exposure is enabled")
             
             #Get current settings
-            current_gain = self.nodemap.Gain.value
-            current_pixel_format = self.nodemap.PixelFormat.value
-            current_acquisition_mode = self.nodemap.AcquisitionMode.value
+
             acquisition_state = self.device.is_acquiring()
             
             time_us = convert_time(time, time_unit, MICROSECONDS)
@@ -270,27 +362,27 @@ class Camera:
             
             self.nodemap.ExposureTime.set_value(time_us)
             
-            self.nodemap.PixelFormat.set_value(current_pixel_format)
-            self.nodemap.Gain.set_value(current_gain)
-            self.nodemap.AcquisitionMode.set_value(current_acquisition_mode)
+
             if acquisition_state:
                 self.device.start()
 
             return convert_time(self.nodemap.ExposureTime.value, MICROSECONDS, time_unit)
         except Exception as e:
-            print("Problem setting exposure time")
-            traceback.print_exception(e)
+            print("Problem setting exposure time", file=sys.stderr)
+            traceback.print_exception(e, file=sys.stderr)
             return None
         
     def change_sensor_mode(self, mode:str=DEFAULT):
+        if self.nodemap.UserSetSelector.value == mode:
+            return
+        
         acquisition_state = self.device.is_acquiring()
         acquisition_mode = self.nodemap.AcquisitionMode.value
         current_pixel_format = self.nodemap.PixelFormat.value
         current_gain = self.nodemap.Gain.value
         current_buffer_handling_mode = self.ds_nodemap.StreamBufferHandlingMode.value
         
-        if acquisition_state:
-            self.device.stop()
+        self.stop_acquisition()
             
         if mode not in [DEFAULT, LONG_EXPOSURE, "UserSet0", "UserSet1"]:
             raise ValueError("Invalid Sensor Mode")
@@ -303,7 +395,7 @@ class Camera:
         self.nodemap.AcquisitionMode.set_value(acquisition_mode)
         
         if acquisition_state:
-            self.device.start()
+            self.start_acquisition()
     
     def _get_gain_min_max(self):
         return self.nodemap.Gain.min, self.nodemap.Gain.max
