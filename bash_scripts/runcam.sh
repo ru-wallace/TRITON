@@ -76,7 +76,7 @@ while [[ $# -gt 0 ]]; do
             fi
             ;;
         -f|--focus)
-            python "$BASE_DIR/python_scripts/get_sharpness.py"
+            python "$BASE_DIR/python_scripts/focus_calc.py"
             exit 0
             ;;
         --harvesters)
