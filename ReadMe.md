@@ -1,8 +1,6 @@
 # AEGIR
 
-
-
-**A**rtifically and **E**nvironmentally **G**enerated **I**rradiance and **R**adiance 
+**A**rtifically and **E**nvironmentally **G**enerated **I**rradiance and **R**adiance
 
 ## Description
 
@@ -59,20 +57,18 @@ The tools will only work on Linux based operating systems. The system is designe
   
 ## Usage
 
-
-
 ## Concepts
 
 ### Device Communication
 
-The application operates a camera using an implementation of the [*GenICam*](https://www.emva.org/standards-technology/genicam/) *GenTL* API  in the device_interface.py file. The Harvesters Image Acquisition Engine package for Python as maintained by the GenICam committee is used to generate images. 
+The application operates a camera using an implementation of the [*GenICam*](https://www.emva.org/standards-technology/genicam/) *GenTL* API  in the device_interface.py file. The Harvesters Image Acquisition Engine package for Python as maintained by the GenICam committee is used to generate images.
 Functions are provided to control all of the features of an IDS Peak UEye+ USB 3 camera. Both Colour and Monochrome devices are supported. On loading the device, all automatic features of the camera such as auto-exposure, auto-gain and colour correction are turned off. The device is configured to use BayerRG8 or Mono8 pixel formats for colour and monochrome devices respectively. This means that the raw digital data is returned in 8-bit format.
 
 A custom algorithm for adjusting integration time automatically is used, though for very low light it can be slow.
 
 ### Sessions
 
-A session is a set of images stored together in a single directory. It is intended that one session be used for one related set of measurements (e.g one run of calibration images, or one drop of the device from a ship). 
+A session is a set of images stored together in a single directory. It is intended that one session be used for one related set of measurements (e.g one run of calibration images, or one drop of the device from a ship).
 
 A session has the following attributes:
 
@@ -106,9 +102,11 @@ The directory uses the following structure:
 
 ### Image Processing
 
+#### Image Regions
+
 The images are processed using the cam_image.py script. To measure various attributes, the following regions are used:
 
-![Regions Diagram](https://raw.githubusercontent.com/ru-wallace/resources/main/triton/regions.png)
+![Regions Diagram](https://raw.githubusercontent.com/ru-wallace/resources/main/triton/regions.png "Diagram of the regions used when processing images")
 
 - **Inner Region**: The active area of the sensor. Due to the fisheye lens, this is a circle roughly centered on the middle of the sensor.
 - **Outer Region**: The dark area of the sensor recieving no direct light from the lens.
@@ -124,12 +122,55 @@ For each region, the fraction of pixels which are saturated is calculated. This 
 
 #### Pixel Averages
 
-For each region, an average pixel value for each colour channel is calculated.
+For each region, an average pixel value for each colour channel is calculated, or a single value for monochrome.
 
 #### Luminance
 
-Explanation of Luminance Calcs ----------------------------
-###################### ################################# ################ ######################## ########### ####################### ############################ ######################################### #############
+To calculate absolute luminance, first relative luminance is ascertained and then a formula applied taking into account gain, integration time, and aperture settings.
+
+##### Relative Luminance
+
+###### *Monochromatic Camera*
+
+For a monochromatic camera, relative luminance is simple, as the pixel values are already a measure of luminance. The white point for the camera is 255, and black point is 0. The pixels are normalised to between 1 and 0 by dividing each value by 255. The mean pixel value of the inner region is then taken as the relative luminance.
+  
+###### *Colour Camera*
+
+For a colour camera capturing data in 8bit RGB, a more complex process is used to ascertain relative luminance. Again the pixel values are normalised to between 0 and 1 by dividing by 255:
+
+${C}'_{sRGB} = \frac{\left (C_{8bit}-KDC  \right )}{\left (WDC-KDC  \right )} \qquad \left (1  \right )$
+
+${C}'_{sRGB} = C_{8bit} \div {255} \qquad \text{ } \left (2  \right )$
+
+Where $C_{8bit}$ is the pixel value between 0 and 255 for each channel, KDC is the black digital count of 0, and WDC is the white digital count of 255.
+
+The camera captures data in the non linear sR'G'B' colour space. Using a procedure defined in *IEC Standard 61966-2-1/AMD1:2003 Section 5.2*, the pixel values are linearised:
+
+$C_{sRGB} = \left\{\begin{matrix}
+C'_{sRGB} \div 12.92 & \text{if }  C'_{sRGB} \leq 0.0405 \\
+\left [ \frac{\left( C'_{sRGB} + 0.055 \right )}{1.055}  \right]^{2.4} & \text{if } C'_{sRGB} > 0.0405 \\
+\end{matrix}\right.  \quad \left (3 \right )$
+
+The mean value for each channel is taken for pixels within the [inner region](#image-regions), and the resulting linear sRGB values are transformed into the CIE 1931 XYZ colour space using:
+
+$\begin{bmatrix}
+X\\
+Y\\
+Z
+\end{bmatrix}= \begin{bmatrix}
+0.4124 & 0.3576 & 0.1805 \\
+0.2126 & 0.7152 & 0.0415 \\
+0.0193 & 0.1192 & 0.9505
+\end{bmatrix}\begin{bmatrix}
+R_{sRGB} \\
+G_{sRGB} \\
+B_{sRGB}\end{bmatrix} \qquad \text{     }\left(4 \right )$
+
+In which the Y value corresponds to the luminance.
+
+##### Absolute Luminance
+
+
 
 #### Auto adjustment of integration time
 
@@ -137,4 +178,6 @@ For the inner active region the white fraction is used to drive the auto-adjustm
 
 The integration time is increased or decreased proportionally to get closer to the target fraction, and the process repeated until within 5% of the target. For short integration times below 1/10th of a second this is trivial, but can be time consuming for longer captures, especially into the tens of seconds.
 
-## Usage
+## References
+
+IEC 2003 BS EN 61966-2-1:2000, IEC 61966-2-1:1999 “Multimedia systems and equipment -  Colour measurement and management: Colour management - Default RGB colour space - sRGB” Online: <https://bsol.bsigroup.com/Bibliographic/BibliographicInfoData/000000000030050324>
